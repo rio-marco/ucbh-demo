@@ -49,7 +49,7 @@ export async function GET() {
     createCodexClient();
     return Response.json({ ready: true, provider: "Agent AI" });
   } catch (error) {
-    console.error("Codex CLI runtime is unavailable", error);
+    console.error("Agent CLI runtime is unavailable", error);
     return Response.json({
       ready: false,
       reason: "runtime",
@@ -70,16 +70,16 @@ const json = (error: string, status: number) =>
 export async function POST(request: Request) {
   if (!(await codexIsReady()))
     return json(
-      "Codex is not signed in on this server. Run `codex login` for the server account, then try again.",
+      "Agent is not signed in on this server. Run `agent login` for the server account, then try again.",
       503,
     );
   let codex: Codex;
   try {
     codex = createCodexClient();
   } catch (error) {
-    console.error("Codex CLI runtime is unavailable", error);
+    console.error("Agent CLI runtime is unavailable", error);
     return json(
-      "Codex CLI runtime is missing on this server. Reinstall the Agent AI packages for this platform and rebuild the app.",
+      "Agent CLI runtime is missing on this server. Reinstall the Agent AI packages for this platform and rebuild the app.",
       503,
     );
   }
@@ -126,7 +126,7 @@ export async function POST(request: Request) {
   if (safeFiles.some((file) => file === null))
     return json("File names must be unique and valid.", 400);
 
-  const root = await mkdtemp(path.join(os.tmpdir(), "ucbh-codex-"));
+  const root = await mkdtemp(path.join(os.tmpdir(), "ucbh-agent-"));
   const workspace = path.join(root, randomUUID());
   await mkdir(workspace, { mode: 0o700 });
   try {
@@ -190,7 +190,7 @@ export async function POST(request: Request) {
               });
           } else if (event.type === "turn.failed" || event.type === "error") {
             failed = true;
-            send("error", { message: "Codex execution failed." });
+            send("error", { message: "Agent execution failed." });
           }
         }
         if (failed || abort.signal.aborted) return;
@@ -213,11 +213,11 @@ export async function POST(request: Request) {
         await collect(workspace);
         send("complete", { usage, files: outputFiles });
       } catch (error) {
-        console.error("Codex execution failed", error);
+        console.error("Agent execution failed", error);
         send("error", {
           message: abort.signal.aborted
             ? "Execution cancelled."
-            : "Codex execution failed. Check server logs for details.",
+            : "Agent execution failed. Check server logs for details.",
         });
       } finally {
         await rm(root, { recursive: true, force: true }).catch((error) =>

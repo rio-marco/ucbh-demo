@@ -9,6 +9,7 @@ import {
   CheckCircle2,
   CircleDollarSign,
   Cloud,
+  DatabaseZap,
   Download,
   FileText,
   Loader2,
@@ -22,6 +23,7 @@ import {
   X,
 } from "lucide-react";
 import Logo from "@/components/logo";
+import SessionHistory, { CleanupDialog } from "@/components/session-history";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -31,7 +33,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import type { Agent } from "@/lib/types";
+import type {
+  Agent,
+  SessionFile,
+  SessionRecord,
+  SessionStatus,
+} from "@/lib/types";
 
 type Upload = { name: string; content: string; size: number };
 type OutputFile = { name: string; content: string };
@@ -46,6 +53,9 @@ type StreamEvent = { type: string; data: Record<string, any> };
 const DEMO_RATES = { inputPerThousand: 0.25, outputPerThousand: 1.1 };
 const DEMO_STARTING_BALANCE = 1000;
 
+const createSessionId = () =>
+  `UCBH-${Math.random().toString(36).slice(2, 7).toUpperCase()}`;
+
 async function readEvents(
   response: Response,
   onEvent: (event: StreamEvent) => void,
@@ -57,36 +67,63 @@ async function readEvents(
   }
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
+  const cancel = () => {
+    void reader.cancel().catch(() => undefined);
+  };
+  signal.addEventListener("abort", cancel, { once: true });
   let buffer = "";
-  while (!signal.aborted) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    const chunks = buffer.split("\n\n");
-    buffer = chunks.pop() || "";
-    for (const chunk of chunks) {
-      const type = chunk.match(/^event: (.+)$/m)?.[1];
-      const data = chunk.match(/^data: (.+)$/m)?.[1];
-      if (type && data) onEvent({ type, data: JSON.parse(data) });
+  try {
+    while (!signal.aborted) {
+      const { value, done } = await reader.read();
+      if (done || signal.aborted) break;
+      buffer += decoder.decode(value, { stream: true });
+      const chunks = buffer.split("\n\n");
+      buffer = chunks.pop() || "";
+      for (const chunk of chunks) {
+        const type = chunk.match(/^event: (.+)$/m)?.[1];
+        const data = chunk.match(/^data: (.+)$/m)?.[1];
+        if (type && data) onEvent({ type, data: JSON.parse(data) });
+      }
     }
+  } finally {
+    signal.removeEventListener("abort", cancel);
   }
 }
 
 const money = (value: number) =>
-  new Intl.NumberFormat("en-IN", {
+  new Intl.NumberFormat("en-US", {
     style: "currency",
-    currency: "INR",
+    currency: "USD",
     maximumFractionDigits: 2,
   }).format(value);
+
+const tokenCount = (
+  usage: Record<string, number> | null | undefined,
+  key: "input_tokens" | "output_tokens",
+) => Math.max(0, Number(usage?.[key] ?? 0));
+
+type PersistInput = {
+  id: string;
+  status: SessionStatus;
+  prompt: string;
+  files: SessionFile[];
+  inputTokens?: number;
+  outputTokens?: number;
+  outputs?: number;
+};
 
 export default function WorkspaceClient({
   agent,
   sessionId,
+  initialSessions,
 }: {
   agent: Agent;
   sessionId: string;
+  initialSessions: SessionRecord[];
 }) {
   const [stage, setStage] = useState<Stage>("task");
+  const [activeSessionId, setActiveSessionId] = useState(sessionId);
+  const [sessions, setSessions] = useState<SessionRecord[]>(initialSessions);
   const [files, setFiles] = useState<Upload[]>([]);
   const [prompt, setPrompt] = useState(agent.prompts[0] || "");
   const [runtime, setRuntime] = useState<"shared" | "private">("private");
@@ -99,6 +136,8 @@ export default function WorkspaceClient({
   const [paymentOpen, setPaymentOpen] = useState(false);
   const [codexReady, setCodexReady] = useState<boolean | null>(null);
   const [rejectNote, setRejectNote] = useState("");
+  const [cleanupOpen, setCleanupOpen] = useState(false);
+  const [cleanupDone, setCleanupDone] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   const inputEstimate =
     10_000 +
@@ -135,6 +174,20 @@ export default function WorkspaceClient({
             : stage === "review" || stage === "complete"
               ? 4
               : 0;
+  const completedSteps = stage === "complete" ? steps.length : activeStep;
+  const processEventCount =
+    activities.length + messages.length + outputs.length;
+  const processRunning = stage === "running";
+  const processDone = stage === "review" || stage === "complete";
+  const processProgress = processDone
+    ? 100
+    : processRunning
+      ? Math.min(92, 8 + processEventCount * 7)
+      : 0;
+  const sessionFiles: SessionFile[] = files.map((file) => ({
+    name: file.name,
+    size: file.size,
+  }));
 
   useEffect(() => {
     fetch("/api/execute", { cache: "no-store" })
@@ -142,6 +195,77 @@ export default function WorkspaceClient({
       .then((data) => setCodexReady(Boolean(data.ready)))
       .catch(() => setCodexReady(false));
   }, []);
+
+  const persistSession = async (input: PersistInput) => {
+    try {
+      const response = await fetch("/api/sessions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ agentId: agent.id, ...input }),
+      });
+      if (!response.ok) return;
+      const data = (await response.json()) as { session: SessionRecord };
+      if (!data.session) return;
+      setSessions((current) =>
+        [
+          data.session,
+          ...current.filter((item) => item.id !== data.session.id),
+        ].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)),
+      );
+    } catch {
+      // Session history is best-effort; the run itself should continue.
+    }
+  };
+
+  const loadSessions = async () => {
+    try {
+      const response = await fetch(
+        `/api/sessions?agentId=${encodeURIComponent(agent.id)}`,
+        { cache: "no-store" },
+      );
+      const data = (await response.json()) as { sessions?: SessionRecord[] };
+      setSessions(data.sessions ?? []);
+    } catch {
+      // Keep the current list if the refresh fails.
+    }
+  };
+
+  const deleteSessionRecord = async (id: string) => {
+    try {
+      await fetch(`/api/sessions?id=${encodeURIComponent(id)}`, {
+        method: "DELETE",
+      });
+    } finally {
+      setSessions((current) => current.filter((item) => item.id !== id));
+    }
+  };
+
+  const cleanupAgentHistory = async (cleanupAgentId: string) => {
+    try {
+      const response = await fetch(
+        `/api/sessions?agentId=${encodeURIComponent(cleanupAgentId)}&scope=agent`,
+        { method: "DELETE" },
+      );
+      if (!response.ok) return;
+      await loadSessions();
+      if (cleanupAgentId === agent.id) setCleanupDone(true);
+    } catch {
+      // Leave the workspace unchanged if cleanup fails.
+    }
+  };
+
+  const resetTask = () => {
+    setStage("task");
+    setPrompt(agent.prompts[0] || "");
+    setFiles([]);
+    setMessages([]);
+    setActivities([]);
+    setOutputs([]);
+    setUsage(null);
+    setError("");
+    setCleanupDone(false);
+    setActiveSessionId(createSessionId());
+  };
 
   const addFiles = async (list: FileList | null) => {
     if (!list) return;
@@ -178,15 +302,30 @@ export default function WorkspaceClient({
   const startCodex = async () => {
     setPaymentOpen(false);
     setDemoBalance((balance) => Math.max(0, balance - estimatedCharge));
+    const runSessionId = createSessionId();
+    setActiveSessionId(runSessionId);
     setStage("running");
     setError("");
     setMessages([]);
     setActivities([]);
     setOutputs([]);
     setUsage(null);
+    setCleanupDone(false);
+    const runFiles = files.map(({ name, size }) => ({ name, size }));
+    void persistSession({
+      id: runSessionId,
+      status: "running",
+      prompt,
+      files: runFiles,
+      inputTokens: 0,
+      outputTokens: 0,
+      outputs: 0,
+    });
     const abort = new AbortController();
     abortRef.current = abort;
     let executionError = "";
+    let runUsage: Record<string, number> | null = null;
+    let runOutputs: OutputFile[] = [];
     try {
       const response = await fetch("/api/execute", {
         method: "POST",
@@ -218,12 +357,14 @@ export default function WorkspaceClient({
               ),
             ]);
           if (event.type === "complete") {
-            setOutputs(event.data.files || []);
-            setUsage(event.data.usage || null);
+            runOutputs = event.data.files || [];
+            runUsage = event.data.usage || null;
+            setOutputs(runOutputs);
+            setUsage(runUsage);
           }
           if (event.type === "error") {
             executionError = String(
-              event.data.message || "Codex execution failed.",
+              event.data.message || "Agent execution failed.",
             );
             setError(executionError);
           }
@@ -231,16 +372,71 @@ export default function WorkspaceClient({
         abort.signal,
       );
       if (abort.signal.aborted) {
-        setError("Execution cancelled.");
-        setStage("estimate");
-      } else if (executionError) setStage("estimate");
-      else setStage("review");
-    } catch (reason) {
-      if (!abort.signal.aborted) {
         setError(
-          reason instanceof Error ? reason.message : "Codex execution failed.",
+          "Execution cancelled. Adjust the task if needed, then run the agent again.",
         );
         setStage("estimate");
+        void persistSession({
+          id: runSessionId,
+          status: "cancelled",
+          prompt,
+          files: runFiles,
+          inputTokens: tokenCount(runUsage, "input_tokens"),
+          outputTokens: tokenCount(runUsage, "output_tokens"),
+          outputs: runOutputs.length,
+        });
+      } else if (executionError) {
+        setStage("estimate");
+        void persistSession({
+          id: runSessionId,
+          status: "failed",
+          prompt,
+          files: runFiles,
+          inputTokens: tokenCount(runUsage, "input_tokens"),
+          outputTokens: tokenCount(runUsage, "output_tokens"),
+          outputs: runOutputs.length,
+        });
+      } else {
+        setStage("review");
+        void persistSession({
+          id: runSessionId,
+          status: "review",
+          prompt,
+          files: runFiles,
+          inputTokens: tokenCount(runUsage, "input_tokens"),
+          outputTokens: tokenCount(runUsage, "output_tokens"),
+          outputs: runOutputs.length,
+        });
+      }
+    } catch (reason) {
+      if (abort.signal.aborted) {
+        setError(
+          "Execution cancelled. Adjust the task if needed, then run the agent again.",
+        );
+        setStage("estimate");
+        void persistSession({
+          id: runSessionId,
+          status: "cancelled",
+          prompt,
+          files: runFiles,
+          inputTokens: tokenCount(runUsage, "input_tokens"),
+          outputTokens: tokenCount(runUsage, "output_tokens"),
+          outputs: runOutputs.length,
+        });
+      } else {
+        setError(
+          reason instanceof Error ? reason.message : "Agent execution failed.",
+        );
+        setStage("estimate");
+        void persistSession({
+          id: runSessionId,
+          status: "failed",
+          prompt,
+          files: runFiles,
+          inputTokens: tokenCount(runUsage, "input_tokens"),
+          outputTokens: tokenCount(runUsage, "output_tokens"),
+          outputs: runOutputs.length,
+        });
       }
     } finally {
       abortRef.current = null;
@@ -253,7 +449,7 @@ export default function WorkspaceClient({
     );
     const anchor = document.createElement("a");
     anchor.href = url;
-    anchor.download = file.name.split("/").pop() || "codex-output.txt";
+    anchor.download = file.name.split("/").pop() || "agent-output.txt";
     anchor.click();
     URL.revokeObjectURL(url);
   };
@@ -262,6 +458,15 @@ export default function WorkspaceClient({
     const note =
       rejectNote.trim() ||
       "Please revise the previous result and address the issues I found.";
+    void persistSession({
+      id: activeSessionId,
+      status: "rejected",
+      prompt,
+      files: sessionFiles,
+      inputTokens: usage?.input_tokens ?? 0,
+      outputTokens: usage?.output_tokens ?? 0,
+      outputs: outputs.length,
+    });
     setPrompt(
       (current) =>
         `${current}\n\nRevision request based on the rejected result:\n${note}`,
@@ -269,6 +474,27 @@ export default function WorkspaceClient({
     setRejectNote("");
     setStage("task");
     setError("");
+  };
+
+  const acceptResult = () => {
+    setStage("complete");
+    void persistSession({
+      id: activeSessionId,
+      status: "accepted",
+      prompt,
+      files: sessionFiles,
+      inputTokens: usage?.input_tokens ?? 0,
+      outputTokens: usage?.output_tokens ?? 0,
+      outputs: outputs.length,
+    });
+  };
+
+  const cancelExecution = () => {
+    abortRef.current?.abort();
+    setError(
+      "Execution cancelled. Adjust the task if needed, then run the agent again.",
+    );
+    setStage("estimate");
   };
 
   return (
@@ -288,586 +514,660 @@ export default function WorkspaceClient({
                 </span>
               </p>
               <p className="mt-1 font-mono text-[8.5px] uppercase tracking-[0.12em] text-muted-foreground">
-                Agent AI · {sessionId}
+                Agent AI · {activeSessionId}
               </p>
             </div>
           </div>
-          <Link
-            href="/"
-            className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-ink"
-          >
-            <ArrowLeft className="h-3.5 w-3.5" />
-            All agents
-          </Link>
+          <div className="flex items-center gap-3">
+            <Link
+              href={`/agents/${agent.id}`}
+              className="hidden text-xs text-muted-foreground hover:text-ink sm:inline"
+            >
+              Agent details
+            </Link>
+            <Link
+              href="/"
+              className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-ink"
+            >
+              <ArrowLeft className="h-3.5 w-3.5" />
+              Dashboard
+            </Link>
+          </div>
         </div>
       </header>
-      <main className="mx-auto grid max-w-6xl gap-7 px-5 py-8 lg:grid-cols-[220px_1fr] lg:gap-10 lg:py-11">
-        <aside className="space-y-3 lg:sticky lg:top-24 lg:h-max">
-          <div className="bai-card p-4">
-            <p className="label mb-4">Your workflow</p>
-            <ol className="space-y-3">
-              {steps.map((label, index) => (
-                <li key={label} className="flex items-center gap-3">
-                  <span
-                    className={`grid h-7 w-7 place-items-center rounded-full border text-[11px] ${index < activeStep ? "border-primary bg-primary text-white" : index === activeStep ? "border-primary bg-primary/10 font-semibold text-primary" : "border-ink/15 text-muted-foreground"}`}
-                  >
-                    {index < activeStep ? (
-                      <Check className="h-3.5 w-3.5" />
-                    ) : (
-                      index + 1
-                    )}
-                  </span>
-                  <span
-                    className={`text-xs ${index === activeStep ? "font-semibold text-ink" : "text-muted-foreground"}`}
-                  >
-                    {label}
-                  </span>
-                </li>
-              ))}
-            </ol>
-          </div>
-        </aside>
-        <section className="min-w-0 space-y-5">
-          <div>
-            <p className="label">
-              Step {String(activeStep + 1).padStart(2, "0")} ·{" "}
-              {steps[activeStep]}
-            </p>
-            <h1 className="mt-2 font-display text-3xl font-bold md:text-[38px]">
-              {stage === "task"
-                ? "Prepare your task"
-                : stage === "runtime"
-                  ? "Choose where Agent runs"
-                  : stage === "estimate"
-                    ? "Review the estimate"
-                    : stage === "running"
-                      ? "Codex is working"
-                      : stage === "complete"
-                        ? "Task accepted"
-                        : "Review Codex’s result"}
-            </h1>
-            <p className="mt-2 max-w-2xl text-[13px] leading-relaxed text-muted-foreground">
-              {stage === "task"
-                ? "Add one or more data files and describe the work you want the agent to do."
-                : "Your prompt and files are sent to Agent AI only after you confirm the payment."}
-            </p>
-          </div>
-          {error && (
-            <div
-              role="alert"
-              className="rounded-xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-800"
-            >
-              {error}
-            </div>
-          )}
-          {codexReady === false && (
-            <div className="flex items-start gap-2 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-xs leading-relaxed text-amber-950">
-              <LockKeyhole className="mt-0.5 h-4 w-4 shrink-0" />
-              <span>
-                Codex isn’t ready on this server. The administrator must sign
-                into Codex and ensure its platform runtime is installed. Users
-                do not need to provide an API key. Payment is disabled until
-                then.
-              </span>
-            </div>
-          )}
 
-          {stage === "task" && (
-            <div className="space-y-4">
-              <div className="bai-card overflow-hidden">
-                <div className="flex flex-wrap items-start justify-between gap-4 border-b border-ink/8 p-5 md:p-6">
-                  <div className="flex items-start gap-4">
-                    <span
-                      className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl text-white shadow-sm"
-                      style={{ background: agent.accent }}
-                    >
-                      <Sparkles className="h-5 w-5" />
-                    </span>
-                    <div>
-                      <p className="font-display text-xl font-bold">
-                        {agent.name}
-                        <span className="ml-2 align-middle font-sans text-[9px] font-medium uppercase tracking-[0.1em] text-muted-foreground">
-                          {agent.role}
-                        </span>
-                      </p>
-                      <p className="mt-1 max-w-xl text-xs leading-relaxed text-muted-foreground">
-                        {agent.tagline} Executed by Agent AI.
-                      </p>
-                    </div>
-                  </div>
-                  <span className="chip">
-                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-                    Selected agent
-                  </span>
+      <main className="mx-auto max-w-6xl px-5 py-8 md:py-11">
+        <div className="grid gap-6 lg:grid-cols-[255px_minmax(0,1fr)] lg:gap-8">
+          <aside className="space-y-3 lg:sticky lg:top-24 lg:h-max">
+            <Link
+              href={`/agents/${agent.id}`}
+              className="flex items-center justify-between rounded-xl border border-ink/10 bg-white/70 px-3 py-2.5 text-[11px] text-muted-foreground transition-colors hover:border-primary/30 hover:text-ink"
+            >
+              Back to agent details
+              <ArrowLeft className="h-3.5 w-3.5" />
+            </Link>
+            {/* <div className="bai-card p-4">
+              <div className="flex items-center justify-between">
+                <p className="label">Agent process</p>
+                <span className="font-display text-lg font-bold">
+                  {processProgress}%
+                </span>
+              </div>
+              <div className="mt-3 h-2 overflow-hidden rounded-full bg-ink/8">
+                <div
+                  className={`h-full rounded-full transition-all duration-500 ${processDone ? "bg-emerald-500" : "bg-primary"}`}
+                  style={{ width: `${processProgress}%` }}
+                />
+              </div>
+              <p className="mt-2 text-[10px] leading-relaxed text-muted-foreground">
+                {processRunning
+                  ? `${processEventCount} process event${processEventCount === 1 ? "" : "s"} completed`
+                  : processDone
+                    ? "Agent process complete."
+                    : "Waiting for agent to start the uploaded files and prompt."}
+              </p>
+              <dl className="mt-3 space-y-1.5 text-[10px]">
+                <div className="flex justify-between gap-2">
+                  <dt className="text-muted-foreground">Session</dt>
+                  <dd className="truncate font-mono">{activeSessionId}</dd>
                 </div>
-                <div className="grid gap-3 p-5 md:grid-cols-3 md:p-6">
-                  {agent.capabilities.map((capability) => (
-                    <div
-                      key={capability}
-                      className="flex items-center gap-2 rounded-xl bg-paper/70 px-3 py-2.5 text-xs"
-                    >
-                      <CheckCircle2 className="h-3.5 w-3.5 text-primary" />
-                      {capability}
+                <div className="flex justify-between">
+                  <dt className="text-muted-foreground">Tokens</dt>
+                  <dd>
+                    {usage
+                      ? (
+                          (usage.input_tokens ?? 0) + (usage.output_tokens ?? 0)
+                        ).toLocaleString()
+                      : "—"}
+                  </dd>
+                </div>
+                <div className="flex justify-between">
+                  <dt className="text-muted-foreground">Outputs</dt>
+                  <dd>{outputs.length}</dd>
+                </div>
+              </dl>
+            </div> */}
+
+            <div className="bai-card p-4">
+              <p className="label">Workflow steps</p>
+              <ol className="mt-4 space-y-3">
+                {steps.map((label, index) => {
+                  const done = index < completedSteps;
+                  const current = index === activeStep && stage !== "complete";
+                  return (
+                    <li key={label} className="flex items-center gap-3">
+                      <span
+                        className={`grid h-7 w-7 shrink-0 place-items-center rounded-full border text-[11px] ${done ? "border-primary bg-primary text-white" : current ? "border-primary bg-primary/10 font-semibold text-primary" : "border-ink/15 text-muted-foreground"}`}
+                      >
+                        {done ? <Check className="h-3.5 w-3.5" /> : index + 1}
+                      </span>
+                      <span
+                        className={`text-xs ${current ? "font-semibold text-ink" : done ? "text-ink/70" : "text-muted-foreground"}`}
+                      >
+                        {label}
+                      </span>
+                    </li>
+                  );
+                })}
+              </ol>
+            </div>
+          </aside>
+
+          <section className="min-w-0 space-y-5">
+            <div>
+              <p className="label">
+                Step {String(activeStep + 1).padStart(2, "0")} ·{" "}
+                {steps[activeStep]}
+              </p>
+              <h1 className="mt-2 font-display text-3xl font-bold md:text-[38px]">
+                {stage === "task"
+                  ? "Prepare your task"
+                  : stage === "runtime"
+                    ? "Choose where Agent runs"
+                    : stage === "estimate"
+                      ? "Review the estimate"
+                      : stage === "running"
+                        ? "Agent is working"
+                        : stage === "complete"
+                          ? "Task accepted"
+                          : "Review Agent’s result"}
+              </h1>
+              <p className="mt-2 max-w-2xl text-[13px] leading-relaxed text-muted-foreground">
+                {stage === "task"
+                  ? "Add one or more data files and describe the work you want the agent to do."
+                  : "Your prompt and files are sent to Agent AI only after you confirm the payment."}
+              </p>
+            </div>
+            {error && (
+              <div
+                role="alert"
+                className="rounded-xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-800"
+              >
+                {error}
+              </div>
+            )}
+            {codexReady === false && (
+              <div className="flex items-start gap-2 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-xs leading-relaxed text-amber-950">
+                <LockKeyhole className="mt-0.5 h-4 w-4 shrink-0" />
+                <span>
+                  Agent isn’t ready on this server. The administrator must sign
+                  into Agent and ensure its platform runtime is installed. Users
+                  do not need to provide an API key. Payment is disabled until
+                  then.
+                </span>
+              </div>
+            )}
+
+            {stage === "task" && (
+              <div className="space-y-4">
+                <div className="bai-card overflow-hidden">
+                  <div className="flex flex-wrap items-start justify-between gap-4 border-b border-ink/8 p-5 md:p-6">
+                    <div className="flex items-start gap-4">
+                      <span
+                        className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl text-white shadow-sm"
+                        style={{ background: agent.accent }}
+                      >
+                        <Sparkles className="h-5 w-5" />
+                      </span>
+                      <div>
+                        <p className="font-display text-xl font-bold">
+                          {agent.name}
+                          <span className="ml-2 align-middle font-sans text-[9px] font-medium uppercase tracking-[0.1em] text-muted-foreground">
+                            {agent.role}
+                          </span>
+                        </p>
+                        <p className="mt-1 max-w-xl text-xs leading-relaxed text-muted-foreground">
+                          {agent.tagline} Executed by Agent AI.
+                        </p>
+                      </div>
                     </div>
-                  ))}
+                    <span className="chip">
+                      <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                      Selected agent
+                    </span>
+                  </div>
+                  <div className="grid gap-3 p-5 md:grid-cols-3 md:p-6">
+                    {agent.capabilities.map((capability) => (
+                      <div
+                        key={capability}
+                        className="flex items-center gap-2 rounded-xl bg-paper/70 px-3 py-2.5 text-xs"
+                      >
+                        <CheckCircle2 className="h-3.5 w-3.5 text-primary" />
+                        {capability}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <div className="grid gap-4 xl:grid-cols-[0.9fr_1.1fr]">
+                  <div className="bai-card p-5">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="label">Task files</p>
+                        <p className="mt-1 text-[11px] text-muted-foreground">
+                          CSV · up to 10 files, 8 MB total
+                        </p>
+                      </div>
+                      <UploadCloud className="h-5 w-5 text-primary" />
+                    </div>
+                    <label className="mt-4 flex cursor-pointer flex-col items-center rounded-2xl border border-dashed border-ink/20 bg-paper/60 px-5 py-8 text-center transition-colors hover:border-primary/40 hover:bg-primary/[0.03]">
+                      <UploadCloud className="h-6 w-6 text-primary" />
+                      <span className="mt-2 text-xs font-semibold">
+                        Drop files here or browse
+                      </span>
+                      <span className="mt-1 text-[10px] text-muted-foreground">
+                        CSV files, 2 MB maximum each
+                      </span>
+                      <input
+                        className="sr-only"
+                        type="file"
+                        multiple
+                        accept=".csv,text/csv"
+                        onChange={(event) => void addFiles(event.target.files)}
+                      />
+                    </label>
+                    {files.length > 0 && (
+                      <ul className="mt-3 space-y-2">
+                        {files.map((file, index) => (
+                          <li
+                            key={`${file.name}-${index}`}
+                            className="flex items-center gap-2 rounded-lg border border-ink/8 px-2.5 py-2"
+                          >
+                            <FileText className="h-3.5 w-3.5 text-primary" />
+                            <span className="min-w-0 flex-1 truncate text-[11px]">
+                              {file.name}
+                            </span>
+                            <span className="font-mono text-[9px] text-muted-foreground">
+                              {(file.size / 1024).toFixed(0)} KB
+                            </span>
+                            <button
+                              type="button"
+                              aria-label={`Remove ${file.name}`}
+                              onClick={() =>
+                                setFiles((items) =>
+                                  items.filter((_, i) => i !== index),
+                                )
+                              }
+                            >
+                              <X className="h-3.5 w-3.5 text-muted-foreground" />
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                  <div className="bai-card p-5">
+                    <p className="label">Task prompt</p>
+                    <p className="mt-1 text-[11px] text-muted-foreground">
+                      Write instructions or paste a task brief for {agent.name}.
+                    </p>
+                    <textarea
+                      className="mt-4 min-h-[190px] w-full resize-y rounded-xl border border-ink/12 bg-white/80 p-3.5 text-[12px] leading-relaxed outline-none transition focus:border-primary/40 focus:ring-2 focus:ring-primary/10"
+                      placeholder="Describe the outcome you need…"
+                      value={prompt}
+                      maxLength={20000}
+                      onChange={(event) => setPrompt(event.target.value)}
+                    />
+                    <p className="mt-2 text-right font-mono text-[9px] text-muted-foreground">
+                      {prompt.length.toLocaleString()} / 20,000
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-[10.5px] text-muted-foreground">
+                    Files stay in browser memory until you continue.
+                  </p>
+                  <Button
+                    disabled={!files.length || !prompt.trim()}
+                    onClick={() => {
+                      setError("");
+                      setStage("runtime");
+                    }}
+                  >
+                    Continue
+                    <ArrowRight className="h-3.5 w-3.5" />
+                  </Button>
                 </div>
               </div>
-              <div className="grid gap-4 xl:grid-cols-[0.9fr_1.1fr]">
-                <div className="bai-card p-5">
-                  <div className="flex items-center justify-between">
+            )}
+
+            {stage === "runtime" && (
+              <div className="space-y-4">
+                <div className="grid gap-4 md:grid-cols-2">
+                  <button
+                    type="button"
+                    onClick={() => setRuntime("shared")}
+                    className={`bai-card bai-lift p-5 text-left ${runtime === "shared" ? "border-primary/50 ring-2 ring-primary/10" : ""}`}
+                  >
+                    <div className="flex items-start justify-between">
+                      <span className="grid h-11 w-11 place-items-center rounded-xl bg-sky-100 text-sky-800">
+                        <Cloud className="h-5 w-5" />
+                      </span>
+                      {runtime === "shared" && (
+                        <CheckCircle2 className="h-5 w-5 text-primary" />
+                      )}
+                    </div>
+                    <p className="mt-4 font-display text-lg font-bold">
+                      Shared server
+                    </p>
+                    <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                      Shared application host with an isolated temporary
+                      workspace for each task.
+                    </p>
+                    <p className="mt-4 font-mono text-[9px] uppercase tracking-wide text-muted-foreground">
+                      Standard · per-run workspace
+                    </p>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setRuntime("private")}
+                    className={`bai-card bai-lift p-5 text-left ${runtime === "private" ? "border-primary/50 ring-2 ring-primary/10" : ""}`}
+                  >
+                    <div className="flex items-start justify-between">
+                      <span className="grid h-11 w-11 place-items-center rounded-xl bg-violet-100 text-violet-800">
+                        <ShieldCheck className="h-5 w-5" />
+                      </span>
+                      {runtime === "private" && (
+                        <CheckCircle2 className="h-5 w-5 text-primary" />
+                      )}
+                    </div>
+                    <p className="mt-4 font-display text-lg font-bold">
+                      Private workspace
+                    </p>
+                    <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                      A separate temporary workspace for this task. Network
+                      access is disabled during execution.
+                    </p>
+                    <p className="mt-4 font-mono text-[9px] uppercase tracking-wide text-muted-foreground">
+                      Enhanced isolation · per-run workspace
+                    </p>
+                  </button>
+                </div>
+                <p className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-[10.5px] leading-relaxed text-amber-950">
+                  Both options currently run on this deployment’s server in the
+                  same Agent sandbox policy. A separate private cloud or
+                  dedicated server is not configured.
+                </p>
+                <div className="flex justify-between">
+                  <Button variant="line" onClick={() => setStage("task")}>
+                    <ArrowLeft className="h-3.5 w-3.5" />
+                    Back
+                  </Button>
+                  <Button onClick={() => setStage("estimate")}>
+                    Continue
+                    <ArrowRight className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {stage === "estimate" && (
+              <div className="space-y-4">
+                <div className="bai-card p-5 md:p-6">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
-                      <p className="label">Task files</p>
-                      <p className="mt-1 text-[11px] text-muted-foreground">
-                        CSV · up to 10 files, 8 MB total
+                      <p className="label">Run estimate</p>
+                      <h2 className="mt-2 font-display text-xl font-bold">
+                        {agent.name} ·{" "}
+                        {runtime === "private"
+                          ? "Private workspace"
+                          : "Shared server"}
+                      </h2>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {files.length} file{files.length === 1 ? "" : "s"} ·{" "}
+                        {files
+                          .reduce((sum, file) => sum + file.size, 0)
+                          .toLocaleString()}{" "}
+                        bytes
                       </p>
                     </div>
-                    <UploadCloud className="h-5 w-5 text-primary" />
+                    <span className="chip">Estimate</span>
                   </div>
-                  <label className="mt-4 flex cursor-pointer flex-col items-center rounded-2xl border border-dashed border-ink/20 bg-paper/60 px-5 py-8 text-center transition-colors hover:border-primary/40 hover:bg-primary/[0.03]">
-                    <UploadCloud className="h-6 w-6 text-primary" />
-                    <span className="mt-2 text-xs font-semibold">
-                      Drop files here or browse
+                  <div className="mt-5 grid gap-3 sm:grid-cols-3">
+                    <div className="rounded-xl bg-paper/80 p-4">
+                      <p className="font-mono text-[9px] uppercase tracking-wide text-muted-foreground">
+                        Estimated input
+                      </p>
+                      <p className="mt-2 font-display text-xl font-bold">
+                        ~{inputEstimate.toLocaleString()}
+                      </p>
+                      <p className="mt-1 text-[10px] text-muted-foreground">
+                        tokens · prompt + files
+                      </p>
+                    </div>
+                    <div className="rounded-xl bg-paper/80 p-4">
+                      <p className="font-mono text-[9px] uppercase tracking-wide text-muted-foreground">
+                        Estimated output
+                      </p>
+                      <p className="mt-2 font-display text-xl font-bold">
+                        ~{outputEstimate.toLocaleString()}
+                      </p>
+                      <p className="mt-1 text-[10px] text-muted-foreground">
+                        tokens · planning estimate
+                      </p>
+                    </div>
+                    <div className="rounded-xl border border-primary/15 bg-primary/[0.04] p-4">
+                      <p className="font-mono text-[9px] uppercase tracking-wide text-secondary-foreground">
+                        Charge
+                      </p>
+                      <p className="mt-2 font-display text-xl font-bold">
+                        {money(estimatedCharge)}
+                      </p>
+                      <p className="mt-1 text-[10px] text-muted-foreground">
+                        preview credits only
+                      </p>
+                    </div>
+                  </div>
+                  <div className="mt-4 flex items-start gap-2 rounded-xl border border-ink/8 px-3.5 py-3">
+                    <CircleDollarSign className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+                    <p className="text-[10.5px] leading-relaxed text-muted-foreground">
+                      Token counts are planning estimates: a Agent runtime
+                      allowance plus prompt and file size for input, and a small
+                      prompt-based output allowance. Rates:{" "}
+                      {money(DEMO_RATES.inputPerThousand)} per 1K input tokens
+                      and {money(DEMO_RATES.outputPerThousand)} per 1K output
+                      tokens. This preview charge is simulated and is not an
+                      Agent charge; actual Agent usage is reported after the run
+                      when available.
+                    </p>
+                  </div>
+                </div>
+                <div className="flex justify-between">
+                  <Button variant="line" onClick={() => setStage("runtime")}>
+                    <ArrowLeft className="h-3.5 w-3.5" />
+                    Back
+                  </Button>
+                  <Button
+                    disabled={!codexReady || estimatedCharge > demoBalance}
+                    onClick={() => setPaymentOpen(true)}
+                  >
+                    <Play className="h-3.5 w-3.5" />
+                    Run agent
+                  </Button>
+                </div>
+                {codexReady === null && (
+                  <p className="text-right text-[10px] text-muted-foreground">
+                    Checking Agent configuration…
+                  </p>
+                )}
+              </div>
+            )}
+
+            {stage === "running" && (
+              <div className="bai-card p-5 md:p-6">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="label">Live Agent execution</p>
+                    <p className="mt-2 font-display text-lg font-bold">
+                      Working in an isolated workspace
+                    </p>
+                  </div>
+                  <span className="chip">
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                    Running
+                  </span>
+                </div>
+                <div className="mt-5 max-h-[420px] space-y-3 overflow-y-auto pr-1">
+                  {activities.map((line, index) => (
+                    <p
+                      key={index}
+                      className="rounded-lg bg-paper px-3 py-2 font-mono text-[10px] text-muted-foreground"
+                    >
+                      {line}
+                    </p>
+                  ))}
+                  {messages.map((message, index) => (
+                    <p
+                      key={index}
+                      className="whitespace-pre-wrap rounded-xl border border-ink/8 bg-white p-4 text-xs leading-relaxed"
+                    >
+                      {message}
+                    </p>
+                  ))}
+                  {!activities.length && !messages.length && (
+                    <p className="text-xs text-muted-foreground">
+                      Waiting for Agent to start…
+                    </p>
+                  )}
+                </div>
+                <Button
+                  type="button"
+                  className="mt-5"
+                  variant="line"
+                  onClick={cancelExecution}
+                >
+                  <Square className="h-3.5 w-3.5 fill-current" />
+                  Cancel execution
+                </Button>
+              </div>
+            )}
+
+            {stage === "review" && (
+              <div className="space-y-4">
+                <div className="bai-card p-5 md:p-6">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="label">Run complete · review required</p>
+                      <h2 className="mt-2 font-display text-xl font-bold">
+                        Agent result
+                      </h2>
+                    </div>
+                    <span className="chip">
+                      <CheckCircle2 className="h-3 w-3" />
+                      Ready for review
                     </span>
-                    <span className="mt-1 text-[10px] text-muted-foreground">
-                      CSV files, 2 MB maximum each
-                    </span>
-                    <input
-                      className="sr-only"
-                      type="file"
-                      multiple
-                      accept=".csv,text/csv"
-                      onChange={(event) => void addFiles(event.target.files)}
-                    />
-                  </label>
-                  {files.length > 0 && (
-                    <ul className="mt-3 space-y-2">
-                      {files.map((file, index) => (
-                        <li
-                          key={`${file.name}-${index}`}
-                          className="flex items-center gap-2 rounded-lg border border-ink/8 px-2.5 py-2"
-                        >
-                          <FileText className="h-3.5 w-3.5 text-primary" />
-                          <span className="min-w-0 flex-1 truncate text-[11px]">
-                            {file.name}
-                          </span>
-                          <span className="font-mono text-[9px] text-muted-foreground">
-                            {(file.size / 1024).toFixed(0)} KB
-                          </span>
-                          <button
-                            type="button"
-                            aria-label={`Remove ${file.name}`}
-                            onClick={() =>
-                              setFiles((items) =>
-                                items.filter((_, i) => i !== index),
-                              )
-                            }
+                  </div>
+                  <div className="mt-4 whitespace-pre-wrap rounded-xl border border-ink/8 bg-white p-4 text-xs leading-relaxed">
+                    {messages.length
+                      ? messages.join("\n\n")
+                      : "Agent completed without a text response."}
+                  </div>
+                  <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                    <div className="rounded-xl bg-paper/80 p-3.5">
+                      <p className="font-mono text-[9px] uppercase tracking-wide text-muted-foreground">
+                        Agent usage · actual
+                      </p>
+                      <p className="mt-2 text-xs">
+                        {usage
+                          ? `${(usage.input_tokens ?? 0).toLocaleString()} input · ${(usage.output_tokens ?? 0).toLocaleString()} output tokens`
+                          : "Usage was not returned by Agent."}
+                      </p>
+                      <p className="mt-1 text-[9px] text-muted-foreground">
+                        Provider charge is not available from the SDK.
+                      </p>
+                    </div>
+                    <div className="rounded-xl bg-paper/80 p-3.5">
+                      <p className="font-mono text-[9px] uppercase tracking-wide text-muted-foreground">
+                        Payment
+                      </p>
+                      <p className="mt-2 text-xs">
+                        {money(estimatedCharge)} preview credits
+                      </p>
+                      <p className="mt-1 text-[9px] text-muted-foreground">
+                        No payment was sent to Agent.
+                      </p>
+                    </div>
+                  </div>
+                  {outputs.length > 0 && (
+                    <div className="mt-5">
+                      <p className="label mb-2">
+                        Generated files · {outputs.length}
+                      </p>
+                      <div className="divide-y divide-ink/8 rounded-xl border border-ink/8 bg-white">
+                        {outputs.map((file, index) => (
+                          <div
+                            key={`${file.name}-${index}`}
+                            className="flex items-center gap-3 px-3 py-2.5"
                           >
-                            <X className="h-3.5 w-3.5 text-muted-foreground" />
-                          </button>
-                        </li>
-                      ))}
-                    </ul>
+                            <FileText className="h-4 w-4 text-primary" />
+                            <span className="min-w-0 flex-1 truncate text-[11px]">
+                              {file.name}
+                            </span>
+                            <Button
+                              size="sm"
+                              variant="line"
+                              onClick={() => download(file)}
+                            >
+                              <Download className="h-3 w-3" />
+                              Download
+                            </Button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
                   )}
                 </div>
                 <div className="bai-card p-5">
-                  <p className="label">Task prompt</p>
-                  <p className="mt-1 text-[11px] text-muted-foreground">
-                    Write instructions or paste a task brief for {agent.name}.
-                  </p>
-                  <textarea
-                    className="mt-4 min-h-[190px] w-full resize-y rounded-xl border border-ink/12 bg-white/80 p-3.5 text-[12px] leading-relaxed outline-none transition focus:border-primary/40 focus:ring-2 focus:ring-primary/10"
-                    placeholder="Describe the outcome you need…"
-                    value={prompt}
-                    maxLength={20000}
-                    onChange={(event) => setPrompt(event.target.value)}
-                  />
-                  <p className="mt-2 text-right font-mono text-[9px] text-muted-foreground">
-                    {prompt.length.toLocaleString()} / 20,000
-                  </p>
-                </div>
-              </div>
-              <div className="flex items-center justify-between gap-3">
-                <p className="text-[10.5px] text-muted-foreground">
-                  Files stay in browser memory until you continue.
-                </p>
-                <Button
-                  disabled={!files.length || !prompt.trim()}
-                  onClick={() => {
-                    setError("");
-                    setStage("runtime");
-                  }}
-                >
-                  Continue
-                  <ArrowRight className="h-3.5 w-3.5" />
-                </Button>
-              </div>
-            </div>
-          )}
-
-          {stage === "runtime" && (
-            <div className="space-y-4">
-              <div className="grid gap-4 md:grid-cols-2">
-                <button
-                  type="button"
-                  onClick={() => setRuntime("shared")}
-                  className={`bai-card bai-lift p-5 text-left ${runtime === "shared" ? "border-primary/50 ring-2 ring-primary/10" : ""}`}
-                >
-                  <div className="flex items-start justify-between">
-                    <span className="grid h-11 w-11 place-items-center rounded-xl bg-sky-100 text-sky-800">
-                      <Cloud className="h-5 w-5" />
+                  <label className="block text-xs font-semibold">
+                    Revision note{" "}
+                    <span className="font-normal text-muted-foreground">
+                      (optional if rejecting)
                     </span>
-                    {runtime === "shared" && (
-                      <CheckCircle2 className="h-5 w-5 text-primary" />
-                    )}
+                    <textarea
+                      className="mt-2 min-h-20 w-full rounded-xl border border-ink/12 bg-white p-3 text-xs"
+                      placeholder="Tell Agent what to change…"
+                      value={rejectNote}
+                      onChange={(event) => setRejectNote(event.target.value)}
+                    />
+                  </label>
+                  <div className="mt-4 flex flex-wrap justify-between gap-3">
+                    <Button variant="line" onClick={rejectResult}>
+                      <RotateCcw className="h-3.5 w-3.5" />
+                      Reject & return task
+                    </Button>
+                    <Button onClick={acceptResult}>
+                      <Check className="h-3.5 w-3.5" />
+                      Accept result
+                    </Button>
                   </div>
-                  <p className="mt-4 font-display text-lg font-bold">
-                    Shared server
-                  </p>
-                  <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-                    Shared application host with an isolated temporary workspace
-                    for each task.
-                  </p>
-                  <p className="mt-4 font-mono text-[9px] uppercase tracking-wide text-muted-foreground">
-                    Standard · per-run workspace
-                  </p>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setRuntime("private")}
-                  className={`bai-card bai-lift p-5 text-left ${runtime === "private" ? "border-primary/50 ring-2 ring-primary/10" : ""}`}
-                >
-                  <div className="flex items-start justify-between">
-                    <span className="grid h-11 w-11 place-items-center rounded-xl bg-violet-100 text-violet-800">
-                      <ShieldCheck className="h-5 w-5" />
-                    </span>
-                    {runtime === "private" && (
-                      <CheckCircle2 className="h-5 w-5 text-primary" />
-                    )}
-                  </div>
-                  <p className="mt-4 font-display text-lg font-bold">
-                    Private workspace
-                  </p>
-                  <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-                    A separate temporary workspace for this task. Network access
-                    is disabled during execution.
-                  </p>
-                  <p className="mt-4 font-mono text-[9px] uppercase tracking-wide text-muted-foreground">
-                    Enhanced isolation · per-run workspace
-                  </p>
-                </button>
+                </div>
               </div>
-              <p className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-[10.5px] leading-relaxed text-amber-950">
-                Both options currently run on this deployment’s server in the
-                same Codex sandbox policy. A separate private cloud or dedicated
-                server is not configured.
-              </p>
-              <div className="flex justify-between">
-                <Button variant="line" onClick={() => setStage("task")}>
-                  <ArrowLeft className="h-3.5 w-3.5" />
-                  Back
-                </Button>
-                <Button onClick={() => setStage("estimate")}>
-                  Continue
-                  <ArrowRight className="h-3.5 w-3.5" />
-                </Button>
-              </div>
-            </div>
-          )}
+            )}
 
-          {stage === "estimate" && (
-            <div className="space-y-4">
-              <div className="bai-card p-5 md:p-6">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div>
-                    <p className="label">Run estimate</p>
-                    <h2 className="mt-2 font-display text-xl font-bold">
-                      {agent.name} ·{" "}
-                      {runtime === "private"
-                        ? "Private workspace"
-                        : "Shared server"}
-                    </h2>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      {files.length} file{files.length === 1 ? "" : "s"} ·{" "}
-                      {files
-                        .reduce((sum, file) => sum + file.size, 0)
-                        .toLocaleString()}{" "}
-                      bytes
-                    </p>
-                  </div>
-                  <span className="chip">Estimate</span>
-                </div>
-                <div className="mt-5 grid gap-3 sm:grid-cols-3">
-                  <div className="rounded-xl bg-paper/80 p-4">
-                    <p className="font-mono text-[9px] uppercase tracking-wide text-muted-foreground">
-                      Estimated input
-                    </p>
-                    <p className="mt-2 font-display text-xl font-bold">
-                      ~{inputEstimate.toLocaleString()}
-                    </p>
-                    <p className="mt-1 text-[10px] text-muted-foreground">
-                      tokens · prompt + files
-                    </p>
-                  </div>
-                  <div className="rounded-xl bg-paper/80 p-4">
-                    <p className="font-mono text-[9px] uppercase tracking-wide text-muted-foreground">
-                      Estimated output
-                    </p>
-                    <p className="mt-2 font-display text-xl font-bold">
-                      ~{outputEstimate.toLocaleString()}
-                    </p>
-                    <p className="mt-1 text-[10px] text-muted-foreground">
-                      tokens · planning estimate
-                    </p>
-                  </div>
-                  <div className="rounded-xl border border-primary/15 bg-primary/[0.04] p-4">
-                    <p className="font-mono text-[9px] uppercase tracking-wide text-secondary-foreground">
-                      Charge
-                    </p>
-                    <p className="mt-2 font-display text-xl font-bold">
-                      {money(estimatedCharge)}
-                    </p>
-                    <p className="mt-1 text-[10px] text-muted-foreground">
-                      preview credits only
-                    </p>
-                  </div>
-                </div>
-                <div className="mt-4 flex items-start gap-2 rounded-xl border border-ink/8 px-3.5 py-3">
-                  <CircleDollarSign className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
-                  <p className="text-[10.5px] leading-relaxed text-muted-foreground">
-                    Token counts are planning estimates: a Agent runtime
-                    allowance plus prompt and file size for input, and a small
-                    prompt-based output allowance. Rates:{" "}
-                    {money(DEMO_RATES.inputPerThousand)} per 1K input tokens and{" "}
-                    {money(DEMO_RATES.outputPerThousand)} per 1K output tokens.
-                    This preview charge is simulated and is not an Agent charge;
-                    actual Codex usage is reported after the run when available.
-                  </p>
-                </div>
-              </div>
-              <div className="flex justify-between">
-                <Button variant="line" onClick={() => setStage("runtime")}>
-                  <ArrowLeft className="h-3.5 w-3.5" />
-                  Back
-                </Button>
-                <Button
-                  disabled={!codexReady || estimatedCharge > demoBalance}
-                  onClick={() => setPaymentOpen(true)}
-                >
-                  <Play className="h-3.5 w-3.5" />
-                  Run agent
-                </Button>
-              </div>
-              {codexReady === null && (
-                <p className="text-right text-[10px] text-muted-foreground">
-                  Checking Codex configuration…
-                </p>
-              )}
-            </div>
-          )}
-
-          {stage === "running" && (
-            <div className="bai-card p-5 md:p-6">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <p className="label">Live Codex execution</p>
-                  <p className="mt-2 font-display text-lg font-bold">
-                    Working in an isolated workspace
-                  </p>
-                </div>
-                <span className="chip">
-                  <Loader2 className="h-3 w-3 animate-spin" />
-                  Running
+            {stage === "complete" && (
+              <div className="bai-card p-6 md:p-8">
+                <span className="grid h-12 w-12 place-items-center rounded-2xl bg-emerald-100 text-emerald-700">
+                  <CheckCircle2 className="h-6 w-6" />
                 </span>
-              </div>
-              <div className="mt-5 space-y-3">
-                {activities.map((line, index) => (
-                  <p
-                    key={index}
-                    className="rounded-lg bg-paper px-3 py-2 font-mono text-[10px] text-muted-foreground"
-                  >
-                    {line}
-                  </p>
-                ))}
-                {messages.map((message, index) => (
-                  <p
-                    key={index}
-                    className="whitespace-pre-wrap rounded-xl border border-ink/8 bg-white p-4 text-xs leading-relaxed"
-                  >
-                    {message}
-                  </p>
-                ))}
-                {!activities.length && !messages.length && (
-                  <p className="text-xs text-muted-foreground">
-                    Waiting for Codex to start…
-                  </p>
-                )}
-              </div>
-              <Button
-                className="mt-5"
-                variant="line"
-                onClick={() => abortRef.current?.abort()}
-              >
-                <Square className="h-3 w-3" />
-                Cancel execution
-              </Button>
-            </div>
-          )}
-
-          {stage === "review" && (
-            <div className="space-y-4">
-              <div className="bai-card p-5 md:p-6">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="label">Run complete · review required</p>
-                    <h2 className="mt-2 font-display text-xl font-bold">
-                      Codex result
-                    </h2>
-                  </div>
-                  <span className="chip">
-                    <CheckCircle2 className="h-3 w-3" />
-                    Ready for review
-                  </span>
-                </div>
-                <div className="mt-4 whitespace-pre-wrap rounded-xl border border-ink/8 bg-white p-4 text-xs leading-relaxed">
-                  {messages.length
-                    ? messages.join("\n\n")
-                    : "Codex completed without a text response."}
-                </div>
-                <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                  <div className="rounded-xl bg-paper/80 p-3.5">
-                    <p className="font-mono text-[9px] uppercase tracking-wide text-muted-foreground">
-                      Codex usage · actual
-                    </p>
-                    <p className="mt-2 text-xs">
-                      {usage
-                        ? `${(usage.input_tokens ?? 0).toLocaleString()} input · ${(usage.output_tokens ?? 0).toLocaleString()} output tokens`
-                        : "Usage was not returned by Codex."}
-                    </p>
-                    <p className="mt-1 text-[9px] text-muted-foreground">
-                      Provider charge is not available from the SDK.
-                    </p>
-                  </div>
-                  <div className="rounded-xl bg-paper/80 p-3.5">
-                    <p className="font-mono text-[9px] uppercase tracking-wide text-muted-foreground">
-                      Payment
-                    </p>
-                    <p className="mt-2 text-xs">
-                      {money(estimatedCharge)} preview credits
-                    </p>
-                    <p className="mt-1 text-[9px] text-muted-foreground">
-                      No payment was sent to Agent.
-                    </p>
-                  </div>
-                </div>
+                <p className="label mt-5">Task accepted</p>
+                <h2 className="mt-2 font-display text-2xl font-bold">
+                  Your review is complete.
+                </h2>
+                <p className="mt-2 max-w-xl text-xs leading-relaxed text-muted-foreground">
+                  Accepted files are ready to download. Run a agent data cleanup
+                  before starting another task. Accepted files are still removed
+                  from the isolated workspace after every run.
+                </p>
                 {outputs.length > 0 && (
-                  <div className="mt-5">
-                    <p className="label mb-2">
-                      Generated files · {outputs.length}
-                    </p>
-                    <div className="divide-y divide-ink/8 rounded-xl border border-ink/8 bg-white">
-                      {outputs.map((file, index) => (
-                        <div
-                          key={`${file.name}-${index}`}
-                          className="flex items-center gap-3 px-3 py-2.5"
+                  <div className="mt-5 space-y-2">
+                    {outputs.map((file, index) => (
+                      <div
+                        key={`${file.name}-${index}`}
+                        className="flex items-center justify-between rounded-xl border border-ink/8 bg-white px-3 py-2"
+                      >
+                        <span className="truncate text-xs">{file.name}</span>
+                        <Button
+                          size="sm"
+                          variant="line"
+                          onClick={() => download(file)}
                         >
-                          <FileText className="h-4 w-4 text-primary" />
-                          <span className="min-w-0 flex-1 truncate text-[11px]">
-                            {file.name}
-                          </span>
-                          <Button
-                            size="sm"
-                            variant="line"
-                            onClick={() => download(file)}
-                          >
-                            <Download className="h-3 w-3" />
-                            Download
-                          </Button>
-                        </div>
-                      ))}
-                    </div>
+                          <Download className="h-3 w-3" />
+                          Download
+                        </Button>
+                      </div>
+                    ))}
                   </div>
                 )}
-              </div>
-              <div className="bai-card p-5">
-                <label className="block text-xs font-semibold">
-                  Revision note{" "}
-                  <span className="font-normal text-muted-foreground">
-                    (optional if rejecting)
-                  </span>
-                  <textarea
-                    className="mt-2 min-h-20 w-full rounded-xl border border-ink/12 bg-white p-3 text-xs"
-                    placeholder="Tell Codex what to change…"
-                    value={rejectNote}
-                    onChange={(event) => setRejectNote(event.target.value)}
-                  />
-                </label>
-                <div className="mt-4 flex flex-wrap justify-between gap-3">
-                  <Button variant="line" onClick={rejectResult}>
-                    <RotateCcw className="h-3.5 w-3.5" />
-                    Reject & return task
-                  </Button>
-                  <Button onClick={() => setStage("complete")}>
-                    <Check className="h-3.5 w-3.5" />
-                    Accept result
-                  </Button>
+                <div className="mt-6 flex flex-wrap items-center gap-3">
+                  {cleanupDone ? (
+                    <Button onClick={resetTask}>
+                      <ArrowRight className="h-3.5 w-3.5" />
+                      Start another task
+                    </Button>
+                  ) : (
+                    <Button variant="line" onClick={() => setCleanupOpen(true)}>
+                      <DatabaseZap className="h-3.5 w-3.5" />
+                      Data cleanup
+                    </Button>
+                  )}
+                  <p className="text-[10.5px] text-muted-foreground">
+                    {cleanupDone
+                      ? "Agent data cleaned. You can start another task."
+                      : "Clean up agent data before starting another task."}
+                  </p>
                 </div>
               </div>
-            </div>
-          )}
+            )}
+          </section>
+        </div>
 
-          {stage === "complete" && (
-            <div className="bai-card p-6 md:p-8">
-              <span className="grid h-12 w-12 place-items-center rounded-2xl bg-emerald-100 text-emerald-700">
-                <CheckCircle2 className="h-6 w-6" />
-              </span>
-              <p className="label mt-5">Task accepted</p>
-              <h2 className="mt-2 font-display text-2xl font-bold">
-                Your review is complete.
-              </h2>
-              <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
-                Accepted files are ready to download. This deployment does not
-                connect to an external business workspace, so accepting records
-                your decision in this session and does not publish changes
-                elsewhere.
-              </p>
-              {outputs.length > 0 && (
-                <div className="mt-5 space-y-2">
-                  {outputs.map((file, index) => (
-                    <div
-                      key={`${file.name}-${index}`}
-                      className="flex items-center justify-between rounded-xl border border-ink/8 bg-white px-3 py-2"
-                    >
-                      <span className="truncate text-xs">{file.name}</span>
-                      <Button
-                        size="sm"
-                        variant="line"
-                        onClick={() => download(file)}
-                      >
-                        <Download className="h-3 w-3" />
-                        Download
-                      </Button>
-                    </div>
-                  ))}
-                </div>
-              )}
-              <Button
-                className="mt-6"
-                onClick={() => {
-                  setStage("task");
-                  setPrompt(agent.prompts[0] || "");
-                  setFiles([]);
-                  setMessages([]);
-                  setOutputs([]);
-                  setUsage(null);
-                  setError("");
-                }}
-              >
-                <ArrowRight className="h-3.5 w-3.5" />
-                Start another task
-              </Button>
-            </div>
-          )}
-        </section>
+        <div className="mt-7">
+          <SessionHistory
+            sessions={sessions}
+            agentId={agent.id}
+            onDelete={deleteSessionRecord}
+            onCleanup={cleanupAgentHistory}
+          />
+        </div>
       </main>
 
       <Dialog open={paymentOpen} onOpenChange={setPaymentOpen}>
@@ -916,6 +1216,13 @@ export default function WorkspaceClient({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <CleanupDialog
+        open={cleanupOpen}
+        onOpenChange={setCleanupOpen}
+        defaultAgentId={agent.id}
+        onConfirm={cleanupAgentHistory}
+      />
     </div>
   );
 }

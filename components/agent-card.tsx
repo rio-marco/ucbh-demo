@@ -5,7 +5,7 @@ import type { Agent } from "@/lib/types";
 export default function AgentCard({ agent }: { agent: Agent }) {
   return (
     <Link
-      href={`/agent/${agent.id}`}
+      href={`/agents/${agent.id}`}
       className="bai-card bai-lift group flex flex-col overflow-hidden p-5"
     >
       <div className="flex items-start justify-between">
@@ -41,7 +41,7 @@ export default function AgentCard({ agent }: { agent: Agent }) {
       </ul>
       <div className="mt-5 flex items-center justify-end border-t border-ink/8 pt-4">
         <span className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-ink/10 bg-white px-2.5 py-1.5 text-[11.5px] font-medium shadow-sm transition-colors group-hover:border-primary/25 group-hover:text-primary">
-          Start task
+          View agent
           <ArrowUpRight className="h-3.5 w-3.5" />
         </span>
       </div>

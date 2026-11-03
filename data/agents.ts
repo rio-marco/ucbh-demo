@@ -1,6 +1,6 @@
 import type { Agent } from "@/lib/types";
 
-// Agent profiles provide task context; all execution and responses come from Codex.
+// Agent profiles provide task context; all execution and responses come from Agent.
 export const AGENTS: Agent[] = [
   {
     id: "atlas",

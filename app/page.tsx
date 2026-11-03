@@ -25,11 +25,17 @@ export default function HomePage() {
           </p>
         </section>
         <section className="border-t border-ink/10 py-10">
-          <div className="mb-5">
-            <p className="label">Agent profiles</p>
-            <h2 className="mt-2 font-display text-2xl font-bold">
-              Choose a starting profile
-            </h2>
+          <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
+            <div>
+              <p className="label">Agent profiles</p>
+              <h2 className="mt-2 font-display text-2xl font-bold">
+                Select an agent to view details
+              </h2>
+            </div>
+            <p className="max-w-sm text-right text-[11px] leading-relaxed text-muted-foreground">
+              Dashboard → agent details → open workspace. Session history is
+              available inside the workspace only.
+            </p>
           </div>
           <div className="grid gap-3 md:grid-cols-3">
             {AGENTS.map((agent) => (
@@ -38,10 +44,11 @@ export default function HomePage() {
           </div>
         </section>
         <p className="border-t border-ink/10 py-6 text-xs leading-relaxed text-muted-foreground">
-          This deployment does not include user sign-in, durable run history,
-          private cloud execution, or provider billing data. The execution flow
-          reports Agent usage where available; provider costs are not available
-          from the SDK.
+          Session history belongs to the agent runtime, not a user account.
+          There is no user sign-in, private cloud execution, or provider billing
+          data. Open an agent workspace to view or clean up session history. The
+          execution flow reports Agent usage where available; provider costs are
+          not available from the SDK.
         </p>
       </main>
     </div>
