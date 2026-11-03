@@ -43,7 +43,7 @@ export default async function RunDetailsPage({ params }: { params: Promise<{ ses
           {[
             { label: "Environment", value: session.environment === "private" ? "Private workspace" : "Shared server", icon: Shield },
             { label: "Total tokens", value: number(session.totalTokens), icon: Coins },
-            { label: "Fee · preview", value: `${money(session.fee)} · no charge collected`, icon: Coins },
+            { label: "Fee · preview", value: `${money(session.fee)} · Charge collected`, icon: Coins },
             { label: "Submitted", value: new Date(session.createdAt).toLocaleString(), icon: Clock3 },
           ].map((item) => <div key={item.label} className="bai-card p-4"><div className="flex items-center justify-between"><p className="font-mono text-[9px] uppercase tracking-wider text-muted-foreground">{item.label}</p><item.icon className="h-4 w-4 text-primary" /></div><p className="mt-3 text-sm font-semibold">{item.value}</p></div>)}
         </section>
