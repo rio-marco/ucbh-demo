@@ -12,12 +12,17 @@ import os from "node:os";
 import path from "node:path";
 import { Codex } from "@openai/codex-sdk";
 import { AGENTS } from "@/data/agents";
+import {
+  AGENT_TEMP_PREFIX,
+  AGENT_THREAD_SOURCE,
+  getCodexHome,
+} from "@/lib/agent-runtime";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
-const codexHome = process.env.CODEX_HOME || path.join(os.homedir(), ".codex");
+const codexHome = getCodexHome();
 
 async function codexIsReady() {
   if (process.env.OPENAI_API_KEY) return true;
@@ -126,7 +131,9 @@ export async function POST(request: Request) {
   if (safeFiles.some((file) => file === null))
     return json("File names must be unique and valid.", 400);
 
-  const root = await mkdtemp(path.join(os.tmpdir(), "ucbh-agent-"));
+  const root = await mkdtemp(
+    path.join(os.tmpdir(), `${AGENT_TEMP_PREFIX}agent-`),
+  );
   const workspace = path.join(root, randomUUID());
   await mkdir(workspace, { mode: 0o700 });
   try {
@@ -157,6 +164,7 @@ export async function POST(request: Request) {
       try {
         send("status", { status: "running" });
         const thread = codex.startThread({
+          threadSource: AGENT_THREAD_SOURCE,
           workingDirectory: workspace,
           skipGitRepoCheck: true,
           sandboxMode: "workspace-write",

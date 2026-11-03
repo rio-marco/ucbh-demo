@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import {
   ChevronRight,
   Coins,
@@ -19,7 +19,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { AGENTS } from "@/data/agents";
 import type { SessionRecord, SessionStatus } from "@/lib/types";
 
 const STATUS_META: Record<
@@ -80,27 +79,18 @@ function StatusBadge({ status }: { status: SessionStatus }) {
 export function CleanupDialog({
   open,
   onOpenChange,
-  defaultAgentId,
   onConfirm,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  defaultAgentId: string;
-  onConfirm: (agentId: string) => Promise<void> | void;
+  onConfirm: () => Promise<void> | void;
 }) {
-  const [agentId, setAgentId] = useState(defaultAgentId);
   const [pending, setPending] = useState(false);
-
-  useEffect(() => {
-    if (open) setAgentId(defaultAgentId);
-  }, [open, defaultAgentId]);
-
-  const selected = AGENTS.find((agent) => agent.id === agentId);
 
   const confirm = async () => {
     setPending(true);
     try {
-      await onConfirm(agentId);
+      await onConfirm();
       onOpenChange(false);
     } finally {
       setPending(false);
@@ -115,53 +105,27 @@ export function CleanupDialog({
             Data cleanup
           </DialogTitle>
           <DialogDescription>
-            Select an agent and clear its session history. User session history
-            is not stored — only the Agent runtime history is removed.
+            Remove the Agent runtime history this store has stored on this
+            server. Your session history below is a separate user activity log
+            and is kept.
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-2">
-          {AGENTS.map((agent) => (
-            <button
-              key={agent.id}
-              type="button"
-              onClick={() => setAgentId(agent.id)}
-              className={`flex w-full items-center justify-between rounded-xl border px-3 py-2.5 text-left transition-colors ${
-                agentId === agent.id
-                  ? "border-primary/50 bg-primary/[0.04] ring-2 ring-primary/10"
-                  : "border-ink/10 hover:border-primary/25"
-              }`}
-            >
-              <span className="flex items-center gap-2.5">
-                <span
-                  className="grid h-8 w-8 place-items-center rounded-lg border border-ink/10 font-display text-sm font-bold"
-                  style={{ background: `${agent.accent}66` }}
-                >
-                  {agent.name[0]}
-                </span>
-                <span>
-                  <span className="block text-xs font-semibold">
-                    {agent.name}
-                  </span>
-                  <span className="block font-mono text-[8.5px] uppercase tracking-[0.1em] text-muted-foreground">
-                    {agent.role} · Agent
-                  </span>
-                </span>
-              </span>
-              {agentId === agent.id && (
-                <span className="chip !bg-emerald-50 !text-emerald-700">
-                  Selected
-                </span>
-              )}
-            </button>
-          ))}
-        </div>
-        <div className="flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2.5 text-[10.5px] leading-relaxed text-red-800">
-          <DatabaseZap className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-          <span>
-            This permanently removes {selected?.name ?? "the selected agent"}'s
-            agent runtime history and token records from this deployment.
-            Generated task files are already deleted after each run.
-          </span>
+          <div className="flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2.5 text-[10.5px] leading-relaxed text-red-800">
+            <DatabaseZap className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            <span>
+              Removed: saved Agent threads, prompts, uploaded file contents,
+              generated outputs, and runtime token records stored by Agent on
+              this server.
+            </span>
+          </div>
+          <div className="flex items-start gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2.5 text-[10.5px] leading-relaxed text-emerald-900">
+            <History className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            <span>
+              Kept: your session history (which agent ran, the action, status,
+              and token totals) plus any result files you already downloaded.
+            </span>
+          </div>
         </div>
         <DialogFooter>
           <Button
@@ -183,7 +147,7 @@ export function CleanupDialog({
             ) : (
               <DatabaseZap className="h-3.5 w-3.5" />
             )}
-            Clean history
+            Clean Agent data
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -193,14 +157,12 @@ export function CleanupDialog({
 
 export default function SessionHistory({
   sessions,
-  agentId,
   onDelete,
   onCleanup,
 }: {
   sessions: SessionRecord[];
-  agentId: string;
   onDelete: (id: string) => Promise<void> | void;
-  onCleanup: (agentId: string) => Promise<void> | void;
+  onCleanup: () => Promise<void> | void;
 }) {
   const [selected, setSelected] = useState<SessionRecord | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<SessionRecord | null>(null);
@@ -231,8 +193,8 @@ export default function SessionHistory({
           <div>
             <p className="text-sm font-semibold">Session history</p>
             <p className="mt-0.5 text-[10.5px] text-muted-foreground">
-              {sessions.length} session{sessions.length === 1 ? "" : "s"} ·
-              stored for the agent, not a user account
+              {sessions.length} action{sessions.length === 1 ? "" : "s"} · your
+              user activity log, kept after Agent data cleanup
             </p>
           </div>
         </div>
@@ -244,8 +206,9 @@ export default function SessionHistory({
             No agent sessions yet
           </p>
           <p className="mx-auto mt-1 max-w-sm text-[10.5px] leading-relaxed text-muted-foreground">
-            Sessions appear here after you prepare a task in the workspace.
-            Dashboard and agent details pages never show history.
+            Your user activity log appears here after you prepare a task. It
+            records the agent, action, status, tokens, and files — and stays
+            when Agent runtime data is cleaned.
           </p>
         </div>
       ) : (
@@ -270,6 +233,7 @@ export default function SessionHistory({
                     </span>
                     <span className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-[9px] text-muted-foreground">
                       <span>{session.id}</span>
+                      <span>{session.agentName}</span>
                       <span>{formatDate(session.updatedAt)}</span>
                       <span className="inline-flex items-center gap-1">
                         <Coins className="h-2.5 w-2.5" />
@@ -448,7 +412,6 @@ export default function SessionHistory({
       <CleanupDialog
         open={cleanupOpen}
         onOpenChange={setCleanupOpen}
-        defaultAgentId={agentId}
         onConfirm={onCleanup}
       />
     </section>

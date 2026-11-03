@@ -155,13 +155,4 @@ export async function deleteSession(id: string): Promise<boolean> {
   });
 }
 
-export async function clearAgentSessions(
-  agentId: string,
-): Promise<number> {
-  return mutate((sessions) => {
-    const next = sessions.filter((session) => session.agentId !== agentId);
-    return { sessions: next, result: sessions.length - next.length };
-  });
-}
-
 export { STATUSES as SESSION_STATUSES };

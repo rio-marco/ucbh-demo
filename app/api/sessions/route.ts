@@ -1,7 +1,6 @@
 import { AGENTS } from "@/data/agents";
 import {
   SESSION_STATUSES,
-  clearAgentSessions,
   deleteSession,
   listSessions,
   upsertSession,
@@ -89,17 +88,9 @@ export async function POST(request: Request) {
 export async function DELETE(request: Request) {
   const url = new URL(request.url);
   const id = url.searchParams.get("id");
-  const agentId = url.searchParams.get("agentId");
-  const scope = url.searchParams.get("scope");
 
-  if (agentId && scope === "agent") {
-    const removed = await clearAgentSessions(agentId);
-    return Response.json({ ok: true, removed });
-  }
-  if (id) {
-    const removed = await deleteSession(id);
-    if (!removed) return bad("Session not found.", 404);
-    return Response.json({ ok: true, removed: 1 });
-  }
-  return bad("Provide a session id or an agent cleanup request.");
+  if (!id) return bad("Provide a session id to delete.");
+  const removed = await deleteSession(id);
+  if (!removed) return bad("Session not found.", 404);
+  return Response.json({ ok: true, removed: 1 });
 }

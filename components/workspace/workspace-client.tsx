@@ -5,6 +5,7 @@ import Link from "next/link";
 import {
   ArrowLeft,
   ArrowRight,
+  Box,
   Check,
   CheckCircle2,
   CircleDollarSign,
@@ -12,6 +13,7 @@ import {
   DatabaseZap,
   Download,
   FileText,
+  GitBranch,
   Loader2,
   LockKeyhole,
   Play,
@@ -19,6 +21,7 @@ import {
   ShieldCheck,
   Sparkles,
   Square,
+  Terminal,
   UploadCloud,
   X,
 } from "lucide-react";
@@ -138,7 +141,9 @@ export default function WorkspaceClient({
   const [rejectNote, setRejectNote] = useState("");
   const [cleanupOpen, setCleanupOpen] = useState(false);
   const [cleanupDone, setCleanupDone] = useState(false);
+  const [runProgress, setRunProgress] = useState(0);
   const abortRef = useRef<AbortController | null>(null);
+  const traceRef = useRef<HTMLDivElement | null>(null);
   const inputEstimate =
     10_000 +
     Math.ceil(
@@ -182,8 +187,44 @@ export default function WorkspaceClient({
   const processProgress = processDone
     ? 100
     : processRunning
-      ? Math.min(92, 8 + processEventCount * 7)
+      ? Math.max(runProgress, Math.min(92, 8 + processEventCount * 7))
       : 0;
+  const pipelineSteps = [
+    {
+      label: "Provision workspace",
+      detail: "Isolated sandbox ready",
+      done: processRunning || processDone,
+      active: false,
+    },
+    {
+      label: "Load task files",
+      detail: `${files.length} file${files.length === 1 ? "" : "s"} staged`,
+      done: files.length > 0,
+      active: false,
+    },
+    {
+      label: "Analyze prompt",
+      detail: messages.length ? "Agent reasoning in progress" : "Waiting for agent",
+      done: messages.length > 0,
+      active: messages.length === 0,
+    },
+    {
+      label: "Execute tools",
+      detail: activities.length
+        ? `${activities.length} process event${activities.length === 1 ? "" : "s"}`
+        : "No commands yet",
+      done: outputs.length > 0 || processDone,
+      active: activities.length > 0 && outputs.length === 0 && processRunning,
+    },
+    {
+      label: "Collect outputs",
+      detail: outputs.length
+        ? `${outputs.length} file${outputs.length === 1 ? "" : "s"} generated`
+        : "Pending",
+      done: outputs.length > 0 || processDone,
+      active: outputs.length === 0 && processRunning,
+    },
+  ];
   const sessionFiles: SessionFile[] = files.map((file) => ({
     name: file.name,
     size: file.size,
@@ -195,6 +236,21 @@ export default function WorkspaceClient({
       .then((data) => setCodexReady(Boolean(data.ready)))
       .catch(() => setCodexReady(false));
   }, []);
+
+  useEffect(() => {
+    if (stage !== "running") return;
+    const timer = window.setInterval(() => {
+      setRunProgress((current) =>
+        current >= 92 ? current : Math.min(92, current + 2 + Math.random() * 5),
+      );
+    }, 900);
+    return () => window.clearInterval(timer);
+  }, [stage]);
+
+  useEffect(() => {
+    const node = traceRef.current;
+    if (node) node.scrollTo({ top: node.scrollHeight, behavior: "smooth" });
+  }, [activities, messages]);
 
   const persistSession = async (input: PersistInput) => {
     try {
@@ -217,19 +273,6 @@ export default function WorkspaceClient({
     }
   };
 
-  const loadSessions = async () => {
-    try {
-      const response = await fetch(
-        `/api/sessions?agentId=${encodeURIComponent(agent.id)}`,
-        { cache: "no-store" },
-      );
-      const data = (await response.json()) as { sessions?: SessionRecord[] };
-      setSessions(data.sessions ?? []);
-    } catch {
-      // Keep the current list if the refresh fails.
-    }
-  };
-
   const deleteSessionRecord = async (id: string) => {
     try {
       await fetch(`/api/sessions?id=${encodeURIComponent(id)}`, {
@@ -240,17 +283,17 @@ export default function WorkspaceClient({
     }
   };
 
-  const cleanupAgentHistory = async (cleanupAgentId: string) => {
+  const cleanupAgentHistory = async () => {
+    setError("");
     try {
-      const response = await fetch(
-        `/api/sessions?agentId=${encodeURIComponent(cleanupAgentId)}&scope=agent`,
-        { method: "DELETE" },
-      );
-      if (!response.ok) return;
-      await loadSessions();
-      if (cleanupAgentId === agent.id) setCleanupDone(true);
+      const response = await fetch("/api/runtime", { method: "DELETE" });
+      if (!response.ok) {
+        setError("Could not clean Agent runtime data. Please try again.");
+        return;
+      }
+      setCleanupDone(true);
     } catch {
-      // Leave the workspace unchanged if cleanup fails.
+      setError("Could not clean Agent runtime data. Please try again.");
     }
   };
 
@@ -264,6 +307,7 @@ export default function WorkspaceClient({
     setUsage(null);
     setError("");
     setCleanupDone(false);
+    setRunProgress(0);
     setActiveSessionId(createSessionId());
   };
 
@@ -311,6 +355,7 @@ export default function WorkspaceClient({
     setOutputs([]);
     setUsage(null);
     setCleanupDone(false);
+    setRunProgress(4);
     const runFiles = files.map(({ name, size }) => ({ name, size }));
     void persistSession({
       id: runSessionId,
@@ -627,7 +672,7 @@ export default function WorkspaceClient({
                     : stage === "estimate"
                       ? "Review the estimate"
                       : stage === "running"
-                        ? "Agent is working"
+                        ? "Working in an isolated workspace"
                         : stage === "complete"
                           ? "Task accepted"
                           : "Review Agent’s result"}
@@ -635,7 +680,9 @@ export default function WorkspaceClient({
               <p className="mt-2 max-w-2xl text-[13px] leading-relaxed text-muted-foreground">
                 {stage === "task"
                   ? "Add one or more data files and describe the work you want the agent to do."
-                  : "Your prompt and files are sent to Agent AI only after you confirm the payment."}
+                  : stage === "running"
+                    ? "Agent AI is executing your task inside a temporary sandbox. Follow the pipeline and live trace below."
+                    : "Your prompt and files are sent to Agent AI only after you confirm the payment."}
               </p>
             </div>
             {error && (
@@ -953,51 +1000,186 @@ export default function WorkspaceClient({
             )}
 
             {stage === "running" && (
-              <div className="bai-card p-5 md:p-6">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <p className="label">Live Agent execution</p>
-                    <p className="mt-2 font-display text-lg font-bold">
-                      Working in an isolated workspace
-                    </p>
+              <div className="space-y-4">
+                <div className="grid gap-4 xl:grid-cols-[285px_minmax(0,1fr)]">
+                  <div className="bai-card flex flex-col p-5">
+                    <div className="flex items-center gap-2.5">
+                      <span className="grid h-8 w-8 place-items-center rounded-lg bg-primary/10 text-primary">
+                        <GitBranch className="h-4 w-4" />
+                      </span>
+                      <div>
+                        <p className="label">Pipeline</p>
+                        <p className="mt-1 text-[10px] text-muted-foreground">
+                          Execution order
+                        </p>
+                      </div>
+                    </div>
+                    <ol className="mt-5 space-y-1">
+                      {pipelineSteps.map((step, index) => (
+                        <li
+                          key={step.label}
+                          className="relative flex gap-3 pb-5 last:pb-0"
+                        >
+                          {index < pipelineSteps.length - 1 && (
+                            <span
+                              className={`absolute left-[13px] top-7 h-[calc(100%-1.25rem)] w-px ${
+                                step.done ? "bg-primary/40" : "bg-ink/10"
+                              }`}
+                            />
+                          )}
+                          <span
+                            className={`relative z-10 grid h-7 w-7 shrink-0 place-items-center rounded-full border text-[10px] ${
+                              step.done
+                                ? "border-primary bg-primary text-white"
+                                : step.active
+                                  ? "border-primary bg-primary/10 font-semibold text-primary"
+                                  : "border-ink/15 bg-white text-muted-foreground"
+                            }`}
+                          >
+                            {step.done ? (
+                              <Check className="h-3.5 w-3.5" />
+                            ) : step.active ? (
+                              <Loader2 className="h-3 w-3 animate-spin" />
+                            ) : (
+                              index + 1
+                            )}
+                          </span>
+                          <div className="min-w-0 pt-0.5">
+                            <p
+                              className={`text-[11.5px] ${
+                                step.active
+                                  ? "font-semibold text-ink"
+                                  : step.done
+                                    ? "text-ink/70"
+                                    : "text-muted-foreground"
+                              }`}
+                            >
+                              {step.label}
+                            </p>
+                            <p className="mt-0.5 truncate text-[9.5px] text-muted-foreground">
+                              {step.detail}
+                            </p>
+                          </div>
+                        </li>
+                      ))}
+                    </ol>
+                    <div className="mt-auto pt-4">
+                      <div className="rounded-xl border border-ink/8 bg-paper/70 px-3 py-2.5">
+                        <div className="flex items-center justify-between gap-2 text-[9.5px]">
+                          <span className="text-muted-foreground">Session</span>
+                          <span className="truncate font-mono">
+                            {activeSessionId}
+                          </span>
+                        </div>
+                        <div className="mt-1.5 flex items-center justify-between gap-2 text-[9.5px]">
+                          <span className="text-muted-foreground">Runtime</span>
+                          <span className="truncate">
+                            {runtime === "private"
+                              ? "Private workspace"
+                              : "Shared server"}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
                   </div>
-                  <span className="chip">
-                    <Loader2 className="h-3 w-3 animate-spin" />
-                    Running
-                  </span>
-                </div>
-                <div className="mt-5 max-h-[420px] space-y-3 overflow-y-auto pr-1">
-                  {activities.map((line, index) => (
-                    <p
-                      key={index}
-                      className="rounded-lg bg-paper px-3 py-2 font-mono text-[10px] text-muted-foreground"
+
+                  <div className="bai-card overflow-hidden">
+                    <div className="flex items-center justify-between gap-3 border-b border-ink/8 px-5 py-4">
+                      <div className="flex items-center gap-2.5">
+                        <span className="grid h-8 w-8 place-items-center rounded-lg bg-ink/5 text-ink">
+                          <Terminal className="h-4 w-4" />
+                        </span>
+                        <div>
+                          <p className="label">Agent Trace</p>
+                          <p className="mt-1 font-mono text-[9px] text-muted-foreground">
+                            {activeSessionId} ·{" "}
+                            {runtime === "private"
+                              ? "private sandbox"
+                              : "shared sandbox"}
+                          </p>
+                        </div>
+                      </div>
+                      <span className="chip">
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                        Running
+                      </span>
+                    </div>
+                    <div
+                      ref={traceRef}
+                      className="max-h-[430px] min-h-[360px] space-y-2 overflow-y-auto bg-[#0d1117] p-4 font-mono text-[11px] leading-relaxed text-slate-300"
                     >
-                      {line}
-                    </p>
-                  ))}
-                  {messages.map((message, index) => (
-                    <p
-                      key={index}
-                      className="whitespace-pre-wrap rounded-xl border border-ink/8 bg-white p-4 text-xs leading-relaxed"
-                    >
-                      {message}
-                    </p>
-                  ))}
-                  {!activities.length && !messages.length && (
-                    <p className="text-xs text-muted-foreground">
-                      Waiting for Agent to start…
-                    </p>
-                  )}
+                      <p className="text-slate-500">
+                        $ connect --workspace {activeSessionId}
+                      </p>
+                      <p className="text-emerald-400">
+                        ✓ isolated workspace ready
+                      </p>
+                      {activities.map((line, index) => (
+                        <p key={`activity-${index}`} className="text-slate-300">
+                          <span className="mr-2 text-emerald-400">›</span>
+                          {line}
+                        </p>
+                      ))}
+                      {messages.map((message, index) => (
+                        <p
+                          key={`message-${index}`}
+                          className="whitespace-pre-wrap border-l-2 border-primary/60 pl-3 text-slate-200"
+                        >
+                          {message}
+                        </p>
+                      ))}
+                      {!activities.length && !messages.length && (
+                        <p className="text-slate-500">
+                          Waiting for Agent to start…
+                        </p>
+                      )}
+                      <p className="flex items-center gap-1.5 pt-1">
+                        <span className="text-emerald-400">$</span>
+                        <span className="h-3.5 w-1.5 animate-pulse bg-emerald-400" />
+                      </p>
+                    </div>
+                  </div>
                 </div>
-                <Button
-                  type="button"
-                  className="mt-5"
-                  variant="line"
-                  onClick={cancelExecution}
-                >
-                  <Square className="h-3.5 w-3.5 fill-current" />
-                  Cancel execution
-                </Button>
+
+                <div className="bai-card p-4 md:p-5">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div className="flex items-center gap-2">
+                      <Box className="h-4 w-4 text-primary" />
+                      <p className="text-xs font-semibold">Simulation run</p>
+                      <span className="font-mono text-[9.5px] text-muted-foreground">
+                        {processEventCount} event
+                        {processEventCount === 1 ? "" : "s"}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <span className="font-display text-lg font-bold">
+                        {Math.round(processProgress)}%
+                      </span>
+                      <Button
+                        size="sm"
+                        variant="line"
+                        onClick={cancelExecution}
+                      >
+                        <Square className="h-3 w-3 fill-current" />
+                        Cancel
+                      </Button>
+                    </div>
+                  </div>
+                  <div className="mt-3 h-2.5 overflow-hidden rounded-full bg-ink/8">
+                    <div
+                      className="h-full rounded-full bg-gradient-to-r from-primary via-violet-500 to-sky-400 transition-all duration-700"
+                      style={{ width: `${processProgress}%` }}
+                    />
+                  </div>
+                  <div className="mt-2 flex items-center justify-between gap-2 text-[10px] text-muted-foreground">
+                    <span>
+                      Working in an isolated workspace · live agent output
+                    </span>
+                    <span className="font-mono">
+                      {Math.round(processProgress)} / 100
+                    </span>
+                  </div>
+                </div>
               </div>
             )}
 
@@ -1113,9 +1295,11 @@ export default function WorkspaceClient({
                   Your review is complete.
                 </h2>
                 <p className="mt-2 max-w-xl text-xs leading-relaxed text-muted-foreground">
-                  Accepted files are ready to download. Run a agent data cleanup
-                  before starting another task. Accepted files are still removed
-                  from the isolated workspace after every run.
+                  Accepted files are ready to download. Run Agent data cleanup
+                  before starting another task to remove the prompt, files, and
+                  thread history Agent stored on this server. Your session
+                  history at the bottom is a separate user activity log and is
+                  kept.
                 </p>
                 {outputs.length > 0 && (
                   <div className="mt-5 space-y-2">
@@ -1151,8 +1335,8 @@ export default function WorkspaceClient({
                   )}
                   <p className="text-[10.5px] text-muted-foreground">
                     {cleanupDone
-                      ? "Agent data cleaned. You can start another task."
-                      : "Clean up agent data before starting another task."}
+                      ? "Agent runtime data cleaned. Your session history is still available below."
+                      : "Clean Agent runtime data before starting another task. Session history is kept."}
                   </p>
                 </div>
               </div>
@@ -1163,7 +1347,6 @@ export default function WorkspaceClient({
         <div className="mt-7">
           <SessionHistory
             sessions={sessions}
-            agentId={agent.id}
             onDelete={deleteSessionRecord}
             onCleanup={cleanupAgentHistory}
           />
@@ -1220,7 +1403,6 @@ export default function WorkspaceClient({
       <CleanupDialog
         open={cleanupOpen}
         onOpenChange={setCleanupOpen}
-        defaultAgentId={agent.id}
         onConfirm={cleanupAgentHistory}
       />
     </div>
