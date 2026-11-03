@@ -26,6 +26,7 @@ import {
   X,
 } from "lucide-react";
 import SessionHistory, { CleanupDialog } from "@/components/session-history";
+import AgentResult from "@/components/agent-result";
 import SiteHeader from "@/components/site-header";
 import { Button } from "@/components/ui/button";
 import {
@@ -129,56 +130,6 @@ type PersistInput = {
   sourceFiles?: Upload[];
   reviewNote?: string;
 };
-
-function AgentResult({ content }: { content: string }) {
-  const lines = content.split("\n");
-  const blocks: {
-    kind: "heading" | "bullet" | "number" | "paragraph";
-    text: string;
-  }[] = [];
-  for (const raw of lines) {
-    const line = raw.trim();
-    if (!line) continue;
-    const heading = line.match(/^(#{1,3})\s+(.+)$/);
-    const bullet = line.match(/^[-*•]\s+(.+)$/);
-    const number = line.match(/^\d+[.)]\s+(.+)$/);
-    if (heading) blocks.push({ kind: "heading", text: heading[2] });
-    else if (bullet) blocks.push({ kind: "bullet", text: bullet[1] });
-    else if (number) blocks.push({ kind: "number", text: number[1] });
-    else blocks.push({ kind: "paragraph", text: line });
-  }
-  if (!blocks.length)
-    return (
-      <p className="text-xs text-muted-foreground">
-        Agent completed without a text response.
-      </p>
-    );
-  return (
-    <div className="space-y-2.5">
-      {blocks.map((block, index) =>
-        block.kind === "heading" ? (
-          <h3 key={index} className="pt-1 font-display text-sm font-bold">
-            {block.text}
-          </h3>
-        ) : block.kind === "bullet" || block.kind === "number" ? (
-          <div
-            key={index}
-            className="flex gap-2 pl-1 text-xs leading-relaxed text-ink/80"
-          >
-            <span className="text-primary">
-              {block.kind === "bullet" ? "•" : `${index + 1}.`}
-            </span>
-            <span>{block.text}</span>
-          </div>
-        ) : (
-          <p key={index} className="text-xs leading-relaxed text-ink/80">
-            {block.text}
-          </p>
-        ),
-      )}
-    </div>
-  );
-}
 
 export default function WorkspaceClient({
   agent,
@@ -1112,11 +1063,6 @@ export default function WorkspaceClient({
                     </p>
                   </button>
                 </div>
-                <p className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-[10.5px] leading-relaxed text-amber-950">
-                  Both options currently run on this deployment’s server in the
-                  same Agent sandbox policy. A separate private cloud or
-                  dedicated server is not configured.
-                </p>
                 <div className="flex justify-between">
                   <Button variant="line" onClick={() => setStage("task")}>
                     <ArrowLeft className="h-3.5 w-3.5" />
@@ -1182,9 +1128,6 @@ export default function WorkspaceClient({
                       <p className="mt-2 font-display text-xl font-bold">
                         {money(estimatedCharge)}
                       </p>
-                      <p className="mt-1 text-[10px] text-muted-foreground">
-                        preview credits only
-                      </p>
                     </div>
                   </div>
                   <div className="mt-4 flex items-start gap-2 rounded-xl border border-ink/8 px-3.5 py-3">
@@ -1195,9 +1138,7 @@ export default function WorkspaceClient({
                       prompt-based output allowance. Rates:{" "}
                       {money(DEMO_RATES.inputPerThousand)} per 1K input tokens
                       and {money(DEMO_RATES.outputPerThousand)} per 1K output
-                      tokens. This preview charge is simulated and is not an
-                      Agent charge; actual Agent usage is reported after the run
-                      when available.
+                      tokens.
                     </p>
                   </div>
                 </div>
@@ -1368,7 +1309,7 @@ export default function WorkspaceClient({
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div className="flex items-center gap-2">
                       <Box className="h-4 w-4 text-primary" />
-                      <p className="text-xs font-semibold">Simulation run</p>
+                      <p className="text-xs font-semibold">Event run</p>
                       <span className="font-mono text-[9.5px] text-muted-foreground">
                         {processEventCount} event
                         {processEventCount === 1 ? "" : "s"}
@@ -1434,19 +1375,13 @@ export default function WorkspaceClient({
                           ? `${(usage.input_tokens ?? 0).toLocaleString()} input · ${(usage.output_tokens ?? 0).toLocaleString()} output tokens`
                           : "Usage was not returned by Agent."}
                       </p>
-                      <p className="mt-1 text-[9px] text-muted-foreground">
-                        Provider charge is not available from the SDK.
-                      </p>
                     </div>
                     <div className="rounded-xl bg-paper/80 p-3.5">
                       <p className="font-mono text-[9px] uppercase tracking-wide text-muted-foreground">
                         Payment
                       </p>
                       <p className="mt-2 text-xs">
-                        {money(estimatedCharge)} preview credits
-                      </p>
-                      <p className="mt-1 text-[9px] text-muted-foreground">
-                        No payment was sent to Agent.
+                        {money(estimatedCharge)} credits
                       </p>
                     </div>
                   </div>
@@ -1598,10 +1533,7 @@ export default function WorkspaceClient({
             <DialogTitle className="font-display text-xl">
               Confirm payment
             </DialogTitle>
-            <DialogDescription>
-              Preview checkout for {agent.name}. No card details are requested
-              and no real payment will be made.
-            </DialogDescription>
+            <DialogDescription>Checkout for {agent.name}.</DialogDescription>
           </DialogHeader>
           <div className="rounded-xl border border-ink/8 bg-paper/70 p-4">
             <div className="flex justify-between text-xs">

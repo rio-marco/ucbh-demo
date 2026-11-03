@@ -263,14 +263,8 @@ export default function SessionHistory({
                   <td className="whitespace-nowrap px-4 py-3 text-[11px] tabular-nums">
                     {number(session.totalTokens)}
                   </td>
-                  <td
-                    className="whitespace-nowrap px-4 py-3 text-[11px] tabular-nums"
-                    title="Preview estimate; no real payment is collected"
-                  >
+                  <td className="whitespace-nowrap px-4 py-3 text-[11px] tabular-nums">
                     {money(session.fee)}
-                    <span className="ml-1 text-[9px] text-muted-foreground">
-                      preview
-                    </span>
                   </td>
                   <td className="whitespace-nowrap px-4 py-3">
                     <StatusBadge status={session.status} />
