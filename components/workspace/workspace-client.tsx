@@ -25,8 +25,8 @@ import {
   UploadCloud,
   X,
 } from "lucide-react";
-import Logo from "@/components/logo";
 import SessionHistory, { CleanupDialog } from "@/components/session-history";
+import SiteHeader from "@/components/site-header";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -544,26 +544,9 @@ export default function WorkspaceClient({
 
   return (
     <div className="min-h-screen">
-      <header className="sticky top-0 z-30 border-b border-ink/8 bg-paper/85 backdrop-blur-xl">
-        <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-5 py-3.5">
-          <div className="flex items-center gap-3">
-            <Link href="/">
-              <Logo compact />
-            </Link>
-            <span className="hidden h-6 w-px bg-ink/10 sm:block" />
-            <div>
-              <p className="text-[12.5px] font-semibold">
-                {agent.name}{" "}
-                <span className="font-normal text-muted-foreground">
-                  · {agent.role}
-                </span>
-              </p>
-              <p className="mt-1 font-mono text-[8.5px] uppercase tracking-[0.12em] text-muted-foreground">
-                Agent AI · {activeSessionId}
-              </p>
-            </div>
-          </div>
-          <div className="flex items-center gap-3">
+      <SiteHeader
+        actions={
+          <>
             <Link
               href={`/agents/${agent.id}`}
               className="hidden text-xs text-muted-foreground hover:text-ink sm:inline"
@@ -577,9 +560,22 @@ export default function WorkspaceClient({
               <ArrowLeft className="h-3.5 w-3.5" />
               Dashboard
             </Link>
-          </div>
+          </>
+        }
+      >
+        <span className="hidden h-6 w-px bg-ink/10 sm:block" />
+        <div className="min-w-0">
+          <p className="truncate text-[12.5px] font-semibold">
+            {agent.name}{" "}
+            <span className="font-normal text-muted-foreground">
+              · {agent.role}
+            </span>
+          </p>
+          <p className="mt-1 truncate font-mono text-[8.5px] uppercase tracking-[0.12em] text-muted-foreground">
+            Agent AI · {activeSessionId}
+          </p>
         </div>
-      </header>
+      </SiteHeader>
 
       <main className="mx-auto max-w-6xl px-5 py-8 md:py-11">
         <div className="grid gap-6 lg:grid-cols-[255px_minmax(0,1fr)] lg:gap-8">

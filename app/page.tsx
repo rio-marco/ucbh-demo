@@ -1,18 +1,11 @@
-import Link from "next/link";
-import { ArrowRight } from "lucide-react";
 import AgentCard from "@/components/agent-card";
-import Logo from "@/components/logo";
-import { Button } from "@/components/ui/button";
+import SiteHeader from "@/components/site-header";
 import { AGENTS } from "@/data/agents";
 
 export default function HomePage() {
   return (
     <div className="min-h-screen">
-      <header className="border-b border-ink/10">
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-5 py-4">
-          <Logo />
-        </div>
-      </header>
+      <SiteHeader brand />
       <main className="mx-auto max-w-6xl px-5">
         <section className="py-14 md:py-10">
           <p className="label">Agent AI · server-side execution</p>
@@ -24,7 +17,7 @@ export default function HomePage() {
             before execution. Runs use a temporary isolated workspace.
           </p>
         </section>
-        <section className="border-t border-ink/10 py-10">
+        <section id="agents" className="border-t border-ink/10 py-10">
           <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
             <div>
               <p className="label">Agent profiles</p>
@@ -43,7 +36,10 @@ export default function HomePage() {
             ))}
           </div>
         </section>
-        <p className="border-t border-ink/10 py-6 text-xs leading-relaxed text-muted-foreground">
+        <p
+          id="data-handling"
+          className="scroll-mt-24 border-t border-ink/10 py-6 text-xs leading-relaxed text-muted-foreground"
+        >
           Session history belongs to the agent runtime, not a user account.
           There is no user sign-in, private cloud execution, or provider billing
           data. Open an agent workspace to view or clean up session history. The

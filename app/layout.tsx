@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from "next";
+import SiteFooter from "@/components/site-footer";
 import "./globals.css";
 
 export const viewport: Viewport = {
@@ -30,7 +31,12 @@ export default function RootLayout({
           rel="stylesheet"
         />
       </head>
-      <body className="font-sans antialiased">{children}</body>
+      <body className="font-sans antialiased">
+        <div className="flex min-h-screen flex-col">
+          <div className="flex-1">{children}</div>
+          <SiteFooter />
+        </div>
+      </body>
     </html>
   );
 }

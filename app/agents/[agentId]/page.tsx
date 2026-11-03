@@ -10,7 +10,7 @@ import {
   Sparkles,
   Timer,
 } from "lucide-react";
-import Logo from "@/components/logo";
+import SiteHeader from "@/components/site-header";
 import { Button } from "@/components/ui/button";
 import { AGENTS } from "@/data/agents";
 import { getAgentStats } from "@/lib/sessions";
@@ -49,11 +49,8 @@ export default async function AgentDetails({
 
   return (
     <div className="min-h-screen">
-      <header className="sticky top-0 z-30 border-b border-ink/8 bg-paper/85 backdrop-blur-xl">
-        <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-5 py-3.5">
-          <Link href="/">
-            <Logo compact />
-          </Link>
+      <SiteHeader
+        actions={
           <Link
             href="/"
             className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-ink"
@@ -61,8 +58,8 @@ export default async function AgentDetails({
             <ArrowLeft className="h-3.5 w-3.5" />
             Dashboard
           </Link>
-        </div>
-      </header>
+        }
+      />
 
       <main className="mx-auto max-w-6xl px-5 py-8 md:py-11">
         <nav className="flex flex-wrap items-center gap-1.5 font-mono text-[9px] uppercase tracking-[0.14em] text-muted-foreground">
