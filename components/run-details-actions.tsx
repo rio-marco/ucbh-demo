@@ -19,6 +19,24 @@ export default function RunDetailsActions({
   const [error, setError] = useState("");
   const isReview = session.status === "review";
 
+  if (session.status === "accepted") return null;
+  if (session.status === "rejected" && session.reviewNote.trim()) {
+    return (
+      <section className="bai-card border-orange-200 p-5 md:p-6">
+        <p className="label">Client decision</p>
+        <h2 className="mt-2 font-display text-xl font-bold">Result rejected</h2>
+        <div className="mt-4 rounded-xl border border-orange-200 bg-orange-50 p-4">
+          <p className="font-mono text-[9px] uppercase tracking-wide text-orange-800">
+            Review note
+          </p>
+          <p className="mt-2 whitespace-pre-wrap text-xs leading-relaxed text-orange-950">
+            {session.reviewNote}
+          </p>
+        </div>
+      </section>
+    );
+  }
+
   const finish = async (status: "accepted" | "rejected") => {
     if (status === "rejected" && !note.trim()) {
       setError(
