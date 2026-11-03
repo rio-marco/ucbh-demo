@@ -326,15 +326,6 @@ export default function WorkspaceClient({
               ))}
             </ol>
           </div>
-          <div className="bai-card-flat p-4">
-            <p className="label">Your wallet</p>
-            <p className="mt-2 font-display text-xl font-bold">
-              {money(demoBalance)}
-            </p>
-            <p className="mt-1 text-[10.5px] text-muted-foreground">
-              Local preview balance · no real payment
-            </p>
-          </div>
         </aside>
         <section className="min-w-0 space-y-5">
           <div>
