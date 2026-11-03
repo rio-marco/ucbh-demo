@@ -26,7 +26,7 @@ export default function HomePage() {
               </h2>
             </div>
             <p className="max-w-sm text-right text-[11px] leading-relaxed text-muted-foreground">
-              Dashboard → agent details → open workspace. Session history is
+              Dashboard → agent details → open workspace. Run history is
               available inside the workspace only.
             </p>
           </div>
@@ -40,9 +40,9 @@ export default function HomePage() {
           id="data-handling"
           className="scroll-mt-24 border-t border-ink/10 py-6 text-xs leading-relaxed text-muted-foreground"
         >
-          Session history belongs to the agent runtime, not a user account.
+          Run history belongs to the agent runtime, not a user account.
           There is no user sign-in, private cloud execution, or provider billing
-          data. Open an agent workspace to view or clean up session history. The
+          data. Open an agent workspace to view or clean up run history. The
           execution flow reports Agent usage where available; provider costs are
           not available from the SDK.
         </p>

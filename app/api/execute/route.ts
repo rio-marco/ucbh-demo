@@ -65,6 +65,7 @@ export async function GET() {
 
 type ExecuteBody = {
   agentId?: string;
+  sessionId?: string;
   prompt?: string;
   files?: { name: string; content: string }[];
 };
@@ -131,8 +132,9 @@ export async function POST(request: Request) {
   if (safeFiles.some((file) => file === null))
     return json("File names must be unique and valid.", 400);
 
+  const sessionKey = (body?.sessionId || randomUUID()).replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 64);
   const root = await mkdtemp(
-    path.join(os.tmpdir(), `${AGENT_TEMP_PREFIX}agent-`),
+    path.join(os.tmpdir(), `${AGENT_TEMP_PREFIX}agent-${sessionKey}-`),
   );
   const workspace = path.join(root, randomUUID());
   await mkdir(workspace, { mode: 0o700 });
@@ -202,6 +204,7 @@ export async function POST(request: Request) {
           }
         }
         if (failed || abort.signal.aborted) return;
+        send("collecting", { status: "running" });
         const outputFiles: { name: string; content: string }[] = [];
         const collect = async (directory: string, prefix = "") => {
           for (const entry of await readdir(directory, {

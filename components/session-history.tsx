@@ -1,13 +1,14 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import {
-  ChevronRight,
-  Coins,
   DatabaseZap,
+  ExternalLink,
   FileText,
   History,
   Loader2,
+  ShieldCheck,
   Trash2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -21,56 +22,58 @@ import {
 } from "@/components/ui/dialog";
 import type { SessionRecord, SessionStatus } from "@/lib/types";
 
-const STATUS_META: Record<
-  SessionStatus,
-  { label: string; badge: string; dot: string }
-> = {
+const STATUS_META: Record<SessionStatus, { label: string; styles: string }> = {
   running: {
     label: "Running",
-    badge: "border-sky-200 bg-sky-50 text-sky-700",
-    dot: "bg-sky-500",
+    styles: "border-sky-200 bg-sky-50 text-sky-700",
   },
   review: {
-    label: "Awaiting review",
-    badge: "border-amber-200 bg-amber-50 text-amber-700",
-    dot: "bg-amber-500",
+    label: "Awaiting approval",
+    styles: "border-amber-200 bg-amber-50 text-amber-700",
   },
   accepted: {
     label: "Accepted",
-    badge: "border-emerald-200 bg-emerald-50 text-emerald-700",
-    dot: "bg-emerald-500",
+    styles: "border-emerald-200 bg-emerald-50 text-emerald-700",
   },
   rejected: {
-    label: "Revision requested",
-    badge: "border-orange-200 bg-orange-50 text-orange-700",
-    dot: "bg-orange-500",
+    label: "Rejected",
+    styles: "border-orange-200 bg-orange-50 text-orange-700",
   },
-  failed: {
-    label: "Failed",
-    badge: "border-red-200 bg-red-50 text-red-700",
-    dot: "bg-red-500",
-  },
+  failed: { label: "Failed", styles: "border-red-200 bg-red-50 text-red-700" },
   cancelled: {
     label: "Cancelled",
-    badge: "border-ink/10 bg-ink/5 text-muted-foreground",
-    dot: "bg-ink/30",
+    styles: "border-ink/10 bg-ink/5 text-muted-foreground",
   },
 };
 
 const number = (value: number) => value.toLocaleString("en-US");
-const formatDate = (value: string) =>
-  new Intl.DateTimeFormat("en-US", {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(new Date(value));
+const money = (value: number) =>
+  new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 2,
+  }).format(value);
+
+function timeAgo(value: string) {
+  const elapsed = Math.max(0, Date.now() - new Date(value).getTime());
+  const minutes = Math.floor(elapsed / 60_000);
+  if (minutes < 1) return "Just now";
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 30) return `${days}d ago`;
+  return new Intl.DateTimeFormat("en-US", { dateStyle: "medium" }).format(
+    new Date(value),
+  );
+}
 
 function StatusBadge({ status }: { status: SessionStatus }) {
   const meta = STATUS_META[status];
   return (
     <span
-      className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 font-mono text-[8.5px] uppercase tracking-[0.1em] ${meta.badge}`}
+      className={`inline-flex items-center rounded-full border px-2 py-1 text-[10px] font-medium ${meta.styles}`}
     >
-      <span className={`h-1.5 w-1.5 rounded-full ${meta.dot}`} />
       {meta.label}
     </span>
   );
@@ -86,7 +89,6 @@ export function CleanupDialog({
   onConfirm: () => Promise<void> | void;
 }) {
   const [pending, setPending] = useState(false);
-
   const confirm = async () => {
     setPending(true);
     try {
@@ -105,25 +107,22 @@ export function CleanupDialog({
             Data cleanup
           </DialogTitle>
           <DialogDescription>
-            Remove the Agent runtime history this store has stored on this
-            server. Your session history below is a separate user activity log
-            and is kept.
+            Remove this run’s Agent runtime history from the server. Run history
+            and its review status are kept.
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-2">
           <div className="flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2.5 text-[10.5px] leading-relaxed text-red-800">
             <DatabaseZap className="mt-0.5 h-3.5 w-3.5 shrink-0" />
             <span>
-              Removed: saved Agent threads, prompts, uploaded file contents,
-              generated outputs, and runtime token records stored by Agent on
-              this server.
+              Removes the run’s saved Agent thread and runtime history.
             </span>
           </div>
           <div className="flex items-start gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2.5 text-[10.5px] leading-relaxed text-emerald-900">
-            <History className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            <ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0" />
             <span>
-              Kept: your session history (which agent ran, the action, status,
-              and token totals) plus any result files you already downloaded.
+              Keeps the session summary, token totals, result, and status in run
+              history.
             </span>
           </div>
         </div>
@@ -158,15 +157,11 @@ export function CleanupDialog({
 export default function SessionHistory({
   sessions,
   onDelete,
-  onCleanup,
 }: {
   sessions: SessionRecord[];
   onDelete: (id: string) => Promise<void> | void;
-  onCleanup: () => Promise<void> | void;
 }) {
-  const [selected, setSelected] = useState<SessionRecord | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<SessionRecord | null>(null);
-  const [cleanupOpen, setCleanupOpen] = useState(false);
   const [pending, setPending] = useState(false);
 
   const confirmDelete = async () => {
@@ -175,9 +170,6 @@ export default function SessionHistory({
     try {
       await onDelete(deleteTarget.id);
       setDeleteTarget(null);
-      setSelected((current) =>
-        current?.id === deleteTarget.id ? null : current,
-      );
     } finally {
       setPending(false);
     }
@@ -185,189 +177,137 @@ export default function SessionHistory({
 
   return (
     <section className="bai-card overflow-hidden">
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-ink/8 p-5">
-        <div className="flex items-center gap-3">
-          <span className="grid h-9 w-9 place-items-center rounded-xl bg-primary/10 text-primary">
-            <History className="h-4 w-4" />
-          </span>
-          <div>
-            <p className="text-sm font-semibold">Session history</p>
-            <p className="mt-0.5 text-[10.5px] text-muted-foreground">
-              {sessions.length} action{sessions.length === 1 ? "" : "s"} · your
-              user activity log, kept after Agent data cleanup
-            </p>
-          </div>
+      <div className="flex items-center gap-3 border-b border-ink/8 p-5">
+        <span className="grid h-9 w-9 place-items-center rounded-xl bg-primary/10 text-primary">
+          <History className="h-4 w-4" />
+        </span>
+        <div>
+          <p className="text-sm font-semibold">Run history</p>
+          <p className="mt-0.5 text-[10.5px] text-muted-foreground">
+            {sessions.length} run{sessions.length === 1 ? "" : "s"} · review and
+            inspect previous results
+          </p>
         </div>
       </div>
-
       {sessions.length === 0 ? (
         <div className="px-5 py-10 text-center">
           <p className="text-xs font-medium text-muted-foreground">
             No agent sessions yet
           </p>
           <p className="mx-auto mt-1 max-w-sm text-[10.5px] leading-relaxed text-muted-foreground">
-            Your user activity log appears here after you prepare a task. It
-            records the agent, action, status, tokens, and files — and stays
-            when Agent runtime data is cleaned.
+            Your runs, prompts, usage, and review status will appear here.
           </p>
         </div>
       ) : (
-        <ul className="divide-y divide-ink/8">
-          {sessions.map((session) => (
-            <li key={session.id}>
-              <div className="group flex items-center gap-3 px-4 py-3 transition-colors hover:bg-paper/70 sm:px-5">
-                <button
-                  type="button"
-                  onClick={() => setSelected(session)}
-                  className="flex min-w-0 flex-1 items-center gap-3 text-left"
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[1050px] border-collapse text-left">
+            <thead className="bg-paper/70">
+              <tr className="font-mono text-[9px] uppercase tracking-[0.12em] text-muted-foreground">
+                {[
+                  "Run",
+                  "Brief",
+                  "Environment",
+                  "Tokens",
+                  "Fee",
+                  "Status",
+                  "Submitted",
+                  "Action",
+                ].map((label) => (
+                  <th
+                    key={label}
+                    className="whitespace-nowrap px-4 py-3 font-medium"
+                  >
+                    {label}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-ink/8">
+              {sessions.map((session) => (
+                <tr
+                  key={session.id}
+                  className="align-top transition-colors hover:bg-paper/40"
                 >
-                  <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-paper text-primary">
-                    <FileText className="h-4 w-4" />
-                  </span>
-                  <span className="min-w-0 flex-1">
-                    <span className="flex flex-wrap items-center gap-2">
-                      <span className="truncate text-xs font-semibold">
-                        {session.title}
-                      </span>
-                      <StatusBadge status={session.status} />
-                    </span>
-                    <span className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-[9px] text-muted-foreground">
-                      <span>{session.id}</span>
-                      <span>{session.agentName}</span>
-                      <span>{formatDate(session.updatedAt)}</span>
-                      <span className="inline-flex items-center gap-1">
-                        <Coins className="h-2.5 w-2.5" />
-                        {number(session.totalTokens)} tokens
-                      </span>
-                      <span>
-                        {session.outputs} file
-                        {session.outputs === 1 ? "" : "s"}
-                      </span>
-                    </span>
-                  </span>
-                  <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
-                </button>
-                <button
-                  type="button"
-                  aria-label={`Delete ${session.title}`}
-                  onClick={() => setDeleteTarget(session)}
-                  className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-muted-foreground transition-colors hover:bg-red-50 hover:text-red-600"
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                </button>
-              </div>
-            </li>
-          ))}
-        </ul>
-      )}
-
-      <Dialog
-        open={selected !== null}
-        onOpenChange={(open) => !open && setSelected(null)}
-      >
-        <DialogContent className="max-w-2xl rounded-2xl">
-          {selected && (
-            <>
-              <DialogHeader>
-                <div className="flex flex-wrap items-center gap-2">
-                  <StatusBadge status={selected.status} />
-                  <span className="font-mono text-[9px] uppercase tracking-[0.12em] text-muted-foreground">
-                    {selected.id}
-                  </span>
-                </div>
-                <DialogTitle className="mt-2 text-left font-display text-xl">
-                  {selected.title}
-                </DialogTitle>
-                <DialogDescription className="text-left">
-                  {selected.agentName} · Agent session ·{" "}
-                  {formatDate(selected.createdAt)}
-                </DialogDescription>
-              </DialogHeader>
-
-              <div className="max-h-[55vh] space-y-4 overflow-y-auto pr-1">
-                <div className="rounded-xl border border-ink/8 bg-paper/60 p-3.5">
-                  <p className="label">Prompt</p>
-                  <p className="mt-2 whitespace-pre-wrap text-[11.5px] leading-relaxed text-ink/75">
-                    {selected.prompt || "No prompt recorded."}
-                  </p>
-                </div>
-
-                <div className="grid gap-3 sm:grid-cols-3">
-                  <div className="rounded-xl bg-paper/70 p-3">
-                    <p className="font-mono text-[8.5px] uppercase tracking-[0.1em] text-muted-foreground">
-                      Input tokens
-                    </p>
-                    <p className="mt-1.5 font-display text-lg font-bold">
-                      {number(selected.inputTokens)}
-                    </p>
-                  </div>
-                  <div className="rounded-xl bg-paper/70 p-3">
-                    <p className="font-mono text-[8.5px] uppercase tracking-[0.1em] text-muted-foreground">
-                      Output tokens
-                    </p>
-                    <p className="mt-1.5 font-display text-lg font-bold">
-                      {number(selected.outputTokens)}
-                    </p>
-                  </div>
-                  <div className="rounded-xl border border-primary/15 bg-primary/[0.04] p-3">
-                    <p className="font-mono text-[8.5px] uppercase tracking-[0.1em] text-muted-foreground">
-                      Total tokens
-                    </p>
-                    <p className="mt-1.5 font-display text-lg font-bold">
-                      {number(selected.totalTokens)}
-                    </p>
-                  </div>
-                </div>
-
-                <div>
-                  <p className="label">Task files · {selected.files.length}</p>
-                  {selected.files.length ? (
-                    <ul className="mt-2 space-y-1.5">
-                      {selected.files.map((file, index) => (
-                        <li
-                          key={`${file.name}-${index}`}
-                          className="flex items-center gap-2 rounded-lg border border-ink/8 px-2.5 py-2 text-[11px]"
+                  <td className="max-w-[190px] px-4 py-3">
+                    <div className="flex items-start gap-2">
+                      <FileText className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+                      <div className="min-w-0">
+                        <p
+                          className="truncate text-[11px] font-semibold"
+                          title={session.files
+                            .map((file) => file.name)
+                            .join(", ")}
                         >
-                          <FileText className="h-3.5 w-3.5 text-primary" />
-                          <span className="min-w-0 flex-1 truncate">
-                            {file.name}
-                          </span>
-                          <span className="font-mono text-[9px] text-muted-foreground">
-                            {(file.size / 1024).toFixed(0)} KB
-                          </span>
-                        </li>
-                      ))}
-                    </ul>
-                  ) : (
-                    <p className="mt-2 text-[11px] text-muted-foreground">
-                      No files recorded.
+                          {session.files[0]?.name || session.title}
+                        </p>
+                        <p
+                          className="mt-1 truncate font-mono text-[9px] text-muted-foreground"
+                          title={session.id}
+                        >
+                          Run-{session.id}
+                        </p>
+                      </div>
+                    </div>
+                  </td>
+                  <td className="max-w-[230px] px-4 py-3">
+                    <p
+                      className="line-clamp-2 text-[11px] leading-relaxed text-ink/75"
+                      title={session.prompt}
+                    >
+                      {session.prompt || session.title}
                     </p>
-                  )}
-                </div>
-
-                <div className="flex flex-wrap justify-between gap-2 rounded-xl border border-ink/8 px-3 py-2.5 text-[10.5px] text-muted-foreground">
-                  <span>Generated files: {selected.outputs}</span>
-                  <span>Updated: {formatDate(selected.updatedAt)}</span>
-                </div>
-              </div>
-
-              <DialogFooter>
-                <Button
-                  type="button"
-                  variant="danger"
-                  onClick={() => {
-                    setDeleteTarget(selected);
-                    setSelected(null);
-                  }}
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                  Delete session
-                </Button>
-              </DialogFooter>
-            </>
-          )}
-        </DialogContent>
-      </Dialog>
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-3 text-[11px]">
+                    {session.environment === "private" ? "Private" : "Shared"}
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-3 text-[11px] tabular-nums">
+                    {number(session.totalTokens)}
+                  </td>
+                  <td
+                    className="whitespace-nowrap px-4 py-3 text-[11px] tabular-nums"
+                    title="Preview estimate; no real payment is collected"
+                  >
+                    {money(session.fee)}
+                    <span className="ml-1 text-[9px] text-muted-foreground">
+                      preview
+                    </span>
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-3">
+                    <StatusBadge status={session.status} />
+                  </td>
+                  <td
+                    className="whitespace-nowrap px-4 py-3 text-[10px] text-muted-foreground"
+                    title={new Date(session.createdAt).toLocaleString()}
+                  >
+                    {timeAgo(session.createdAt)}
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-3">
+                    <div className="flex items-center gap-1">
+                      <Link
+                        href={`/run-details/${encodeURIComponent(session.id)}`}
+                        aria-label={`View details for ${session.id}`}
+                        title="View run details"
+                        className="grid h-8 w-8 place-items-center rounded-lg text-primary hover:bg-primary/10"
+                      >
+                        <ExternalLink className="h-4 w-4" />
+                      </Link>
+                      <button
+                        type="button"
+                        aria-label={`Delete ${session.id}`}
+                        title="Delete run"
+                        onClick={() => setDeleteTarget(session)}
+                        className="grid h-8 w-8 place-items-center rounded-lg text-muted-foreground hover:bg-red-50 hover:text-red-600"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       <Dialog
         open={deleteTarget !== null}
@@ -376,11 +316,11 @@ export default function SessionHistory({
         <DialogContent className="max-w-sm rounded-2xl">
           <DialogHeader>
             <DialogTitle className="font-display text-lg">
-              Delete session?
+              Delete run?
             </DialogTitle>
             <DialogDescription>
-              This removes {deleteTarget?.id} from the session history. This
-              cannot be undone.
+              This removes {deleteTarget?.id} from run history. This cannot be
+              undone.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -408,12 +348,6 @@ export default function SessionHistory({
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
-      <CleanupDialog
-        open={cleanupOpen}
-        onOpenChange={setCleanupOpen}
-        onConfirm={onCleanup}
-      />
     </section>
   );
 }

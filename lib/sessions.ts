@@ -19,7 +19,7 @@ async function readAll(): Promise<SessionRecord[]> {
     const raw = await fs.readFile(STORE_PATH, "utf8");
     const parsed = JSON.parse(raw) as unknown;
     if (!Array.isArray(parsed)) return [];
-    return parsed.filter(isSessionRecord);
+    return parsed.filter(isSessionRecord).map(normalize);
   } catch {
     return [];
   }
@@ -55,10 +55,22 @@ function normalize(record: SessionRecord): SessionRecord {
     prompt:
       typeof record.prompt === "string" ? record.prompt.slice(0, 20_000) : "",
     files: Array.isArray(record.files) ? record.files.slice(0, 10) : [],
+    sourceFiles: Array.isArray(record.sourceFiles)
+      ? record.sourceFiles
+          .filter((file) => file && typeof file.name === "string" && typeof file.content === "string")
+          .slice(0, 10)
+      : undefined,
     inputTokens,
     outputTokens,
     totalTokens: inputTokens + outputTokens,
     outputs: Math.max(0, Math.round(record.outputs || 0)),
+    environment: record.environment === "shared" ? "shared" : "private",
+    fee: Math.max(0, Number(record.fee) || 0),
+    result: typeof record.result === "string" ? record.result.slice(0, 50_000) : "",
+    reviewNote: typeof record.reviewNote === "string" ? record.reviewNote.slice(0, 20_000) : "",
+    trace: Array.isArray(record.trace)
+      ? record.trace.filter((entry) => typeof entry === "string").slice(-200)
+      : [],
   };
 }
 
@@ -82,7 +94,12 @@ export async function listSessions(agentId?: string): Promise<SessionRecord[]> {
   const sessions = await readAll();
   return sessions
     .filter((session) => !agentId || session.agentId === agentId)
-    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+    .map(({ sourceFiles: _sourceFiles, ...session }) => session);
+}
+
+export async function getSession(id: string): Promise<SessionRecord | null> {
+  return (await readAll()).find((session) => session.id === id) ?? null;
 }
 
 export async function getAgentStats(agentId: string): Promise<SessionStats> {
@@ -126,6 +143,12 @@ export type SessionInput = {
   inputTokens?: number;
   outputTokens?: number;
   outputs?: number;
+  sourceFiles?: { name: string; content: string; size: number }[];
+  environment?: "private" | "shared";
+  fee?: number;
+  result?: string;
+  reviewNote?: string;
+  trace?: string[];
 };
 
 export async function upsertSession(
@@ -141,6 +164,15 @@ export async function upsertSession(
       inputTokens: input.inputTokens ?? existing?.inputTokens ?? 0,
       outputTokens: input.outputTokens ?? existing?.outputTokens ?? 0,
       outputs: input.outputs ?? existing?.outputs ?? 0,
+      sourceFiles:
+        input.status !== "running" && input.status !== "review"
+          ? undefined
+          : input.sourceFiles ?? existing?.sourceFiles,
+      environment: input.environment ?? existing?.environment ?? "private",
+      fee: input.fee ?? existing?.fee ?? 0,
+      result: input.result ?? existing?.result ?? "",
+      reviewNote: input.reviewNote ?? existing?.reviewNote ?? "",
+      trace: input.trace ?? existing?.trace ?? [],
       createdAt: existing?.createdAt ?? now,
       updatedAt: now,
     } as SessionRecord);

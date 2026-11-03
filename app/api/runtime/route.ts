@@ -3,9 +3,10 @@ import { clearAgentRuntimeHistory } from "@/lib/agent-runtime";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export async function DELETE() {
+export async function DELETE(request: Request) {
   try {
-    const result = await clearAgentRuntimeHistory();
+    const sessionId = new URL(request.url).searchParams.get("sessionId") || undefined;
+    const result = await clearAgentRuntimeHistory(sessionId);
     return Response.json({ ok: true, ...result });
   } catch (error) {
     console.error("Agent runtime cleanup failed", error);

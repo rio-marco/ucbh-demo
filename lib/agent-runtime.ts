@@ -23,11 +23,15 @@ export type RuntimeCleanupResult = {
   historyEntries: number;
 };
 
-function isAppThread(row: ThreadRow) {
+function isAppThread(row: ThreadRow, sessionId?: string) {
   const cwd = row.cwd ?? "";
   const tempRoot = `${os.tmpdir().replace(/\/+$/, "")}${path.sep}`;
   const inAppWorkspace = cwd.startsWith(`${tempRoot}${AGENT_TEMP_PREFIX}`);
   const marked = (row.thread_source ?? "").startsWith(AGENT_THREAD_SOURCE);
+  if (sessionId) {
+    const sessionKey = sessionId.replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 64);
+    return inAppWorkspace && cwd.includes(`agent-${sessionKey}-`);
+  }
   return inAppWorkspace || marked;
 }
 
@@ -96,7 +100,7 @@ async function pruneJsonl(file: string, ids: Set<string>) {
   }
 }
 
-export async function clearAgentRuntimeHistory(): Promise<RuntimeCleanupResult> {
+export async function clearAgentRuntimeHistory(sessionId?: string): Promise<RuntimeCleanupResult> {
   const codexHome = getCodexHome();
   const entries = await fs
     .readdir(/*turbopackIgnore: true*/ codexHome)
@@ -118,7 +122,7 @@ export async function clearAgentRuntimeHistory(): Promise<RuntimeCleanupResult> 
           .prepare("SELECT id, cwd, thread_source, rollout_path FROM threads")
           .all() as ThreadRow[];
         for (const row of rows) {
-          if (!isAppThread(row)) continue;
+          if (!isAppThread(row, sessionId)) continue;
           ids.add(row.id);
           if (row.rollout_path) rolloutPaths.add(row.rollout_path);
         }

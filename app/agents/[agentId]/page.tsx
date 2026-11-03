@@ -213,7 +213,7 @@ export default async function AgentDetails({
               <p className="mt-2 text-[12.5px] leading-relaxed text-muted-foreground">
                 Open the workspace to prepare your task, upload CSV files, and
                 review the estimate. The workspace shows the live agent process,
-                a step-by-step progress bar, and the session history at the
+                a step-by-step progress bar, and the run history at the
                 bottom. Dashboard and agent details stay history-free.
               </p>
             </div>

@@ -56,8 +56,17 @@ type StreamEvent = { type: string; data: Record<string, any> };
 const DEMO_RATES = { inputPerThousand: 0.25, outputPerThousand: 1.1 };
 const DEMO_STARTING_BALANCE = 1000;
 
-const createSessionId = () =>
-  `UCBH-${Math.random().toString(36).slice(2, 7).toUpperCase()}`;
+const createSessionId = () => {
+  const webCrypto = globalThis.crypto;
+  if (typeof webCrypto?.randomUUID === "function") {
+    return `UCBH-${webCrypto.randomUUID().toUpperCase()}`;
+  }
+
+  // Session IDs are labels for this UI/runtime history, not credentials.
+  // randomUUID is unavailable in some browsers and non-secure origins.
+  const fallback = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
+  return `UCBH-${fallback.toUpperCase()}`;
+};
 
 async function readEvents(
   response: Response,
@@ -113,25 +122,96 @@ type PersistInput = {
   inputTokens?: number;
   outputTokens?: number;
   outputs?: number;
+  environment?: "private" | "shared";
+  fee?: number;
+  result?: string;
+  trace?: string[];
+  sourceFiles?: Upload[];
+  reviewNote?: string;
 };
+
+function AgentResult({ content }: { content: string }) {
+  const lines = content.split("\n");
+  const blocks: {
+    kind: "heading" | "bullet" | "number" | "paragraph";
+    text: string;
+  }[] = [];
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (!line) continue;
+    const heading = line.match(/^(#{1,3})\s+(.+)$/);
+    const bullet = line.match(/^[-*•]\s+(.+)$/);
+    const number = line.match(/^\d+[.)]\s+(.+)$/);
+    if (heading) blocks.push({ kind: "heading", text: heading[2] });
+    else if (bullet) blocks.push({ kind: "bullet", text: bullet[1] });
+    else if (number) blocks.push({ kind: "number", text: number[1] });
+    else blocks.push({ kind: "paragraph", text: line });
+  }
+  if (!blocks.length)
+    return (
+      <p className="text-xs text-muted-foreground">
+        Agent completed without a text response.
+      </p>
+    );
+  return (
+    <div className="space-y-2.5">
+      {blocks.map((block, index) =>
+        block.kind === "heading" ? (
+          <h3 key={index} className="pt-1 font-display text-sm font-bold">
+            {block.text}
+          </h3>
+        ) : block.kind === "bullet" || block.kind === "number" ? (
+          <div
+            key={index}
+            className="flex gap-2 pl-1 text-xs leading-relaxed text-ink/80"
+          >
+            <span className="text-primary">
+              {block.kind === "bullet" ? "•" : `${index + 1}.`}
+            </span>
+            <span>{block.text}</span>
+          </div>
+        ) : (
+          <p key={index} className="text-xs leading-relaxed text-ink/80">
+            {block.text}
+          </p>
+        ),
+      )}
+    </div>
+  );
+}
 
 export default function WorkspaceClient({
   agent,
   sessionId,
   initialSessions,
+  resume,
 }: {
   agent: Agent;
   sessionId: string;
   initialSessions: SessionRecord[];
+  resume?: {
+    sessionId: string;
+    prompt: string;
+    files: Upload[];
+    environment: "private" | "shared";
+    revisionNote: string;
+  };
 }) {
   const [stage, setStage] = useState<Stage>("task");
-  const [activeSessionId, setActiveSessionId] = useState(sessionId);
+  const [activeSessionId, setActiveSessionId] = useState(
+    resume?.sessionId ?? sessionId,
+  );
   const [sessions, setSessions] = useState<SessionRecord[]>(initialSessions);
-  const [files, setFiles] = useState<Upload[]>([]);
-  const [prompt, setPrompt] = useState(agent.prompts[0] || "");
-  const [runtime, setRuntime] = useState<"shared" | "private">("private");
+  const [files, setFiles] = useState<Upload[]>(resume?.files ?? []);
+  const [prompt, setPrompt] = useState(
+    resume?.prompt ?? agent.prompts[0] ?? "",
+  );
+  const [runtime, setRuntime] = useState<"shared" | "private">(
+    resume?.environment ?? "private",
+  );
   const [messages, setMessages] = useState<string[]>([]);
   const [activities, setActivities] = useState<string[]>([]);
+  const [collecting, setCollecting] = useState(false);
   const [outputs, setOutputs] = useState<OutputFile[]>([]);
   const [usage, setUsage] = useState<Record<string, number> | null>(null);
   const [error, setError] = useState("");
@@ -204,27 +284,33 @@ export default function WorkspaceClient({
     },
     {
       label: "Analyze prompt",
-      detail: messages.length
-        ? "Agent reasoning in progress"
-        : "Waiting for agent",
-      done: messages.length > 0,
-      active: messages.length === 0,
+      detail: processDone
+        ? "Analysis complete"
+        : messages.length
+          ? "Agent response received"
+          : "Waiting for agent",
+      done: messages.length > 0 || processDone,
+      active: processRunning && messages.length === 0,
     },
     {
       label: "Execute tools",
       detail: activities.length
         ? `${activities.length} process event${activities.length === 1 ? "" : "s"}`
         : "No commands yet",
-      done: outputs.length > 0 || processDone,
-      active: activities.length > 0 && outputs.length === 0 && processRunning,
+      done: collecting || processDone,
+      active: activities.length > 0 && !collecting && !processDone,
     },
     {
       label: "Collect outputs",
       detail: outputs.length
         ? `${outputs.length} file${outputs.length === 1 ? "" : "s"} generated`
-        : "Pending",
-      done: outputs.length > 0 || processDone,
-      active: outputs.length === 0 && processRunning,
+        : processDone
+          ? "No output files generated"
+          : collecting
+            ? "Collecting output files"
+            : "Waiting for agent tools",
+      done: processDone,
+      active: collecting && processRunning,
     },
   ];
   const sessionFiles: SessionFile[] = files.map((file) => ({
@@ -254,24 +340,26 @@ export default function WorkspaceClient({
     if (node) node.scrollTo({ top: node.scrollHeight, behavior: "smooth" });
   }, [activities, messages]);
 
-  const persistSession = async (input: PersistInput) => {
+  const persistSession = async (input: PersistInput): Promise<boolean> => {
     try {
       const response = await fetch("/api/sessions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ agentId: agent.id, ...input }),
       });
-      if (!response.ok) return;
+      if (!response.ok) return false;
       const data = (await response.json()) as { session: SessionRecord };
-      if (!data.session) return;
+      if (!data.session) return false;
       setSessions((current) =>
         [
           data.session,
           ...current.filter((item) => item.id !== data.session.id),
         ].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)),
       );
+      return true;
     } catch {
-      // Session history is best-effort; the run itself should continue.
+      // Run history is best-effort; the run itself should continue.
+      return false;
     }
   };
 
@@ -288,7 +376,10 @@ export default function WorkspaceClient({
   const cleanupAgentHistory = async () => {
     setError("");
     try {
-      const response = await fetch("/api/runtime", { method: "DELETE" });
+      const response = await fetch(
+        `/api/runtime?sessionId=${encodeURIComponent(activeSessionId)}`,
+        { method: "DELETE" },
+      );
       if (!response.ok) {
         setError("Could not clean Agent runtime data. Please try again.");
         return;
@@ -305,6 +396,7 @@ export default function WorkspaceClient({
     setFiles([]);
     setMessages([]);
     setActivities([]);
+    setCollecting(false);
     setOutputs([]);
     setUsage(null);
     setError("");
@@ -345,25 +437,58 @@ export default function WorkspaceClient({
     setFiles((current) => [...current, ...loaded]);
   };
 
-  const startCodex = async () => {
+  const startCodex = async (revisionNote = "") => {
+    const runPrompt = revisionNote.trim()
+      ? `${prompt}\n\nRevision note for this update:\n${revisionNote.trim()}`
+      : prompt;
+    if (runPrompt.length > 20_000) {
+      setError(
+        "The task and revision note must fit within 20,000 characters. Shorten the note and try again.",
+      );
+      return;
+    }
+    if (revisionNote.trim()) setPrompt(runPrompt);
     setPaymentOpen(false);
     setDemoBalance((balance) => Math.max(0, balance - estimatedCharge));
-    const runSessionId = createSessionId();
+    const runSessionId = revisionNote.trim()
+      ? activeSessionId
+      : createSessionId();
     setActiveSessionId(runSessionId);
     setStage("running");
     setError("");
     setMessages([]);
     setActivities([]);
+    setCollecting(false);
     setOutputs([]);
     setUsage(null);
     setCleanupDone(false);
     setRunProgress(4);
     const runFiles = files.map(({ name, size }) => ({ name, size }));
-    void persistSession({
+    const sourceFiles = files.map(({ name, content, size }) => ({
+      name,
+      content,
+      size,
+    }));
+    const runMessages: string[] = [];
+    const previousTrace = revisionNote
+      ? (sessions.find((session) => session.id === activeSessionId)?.trace ??
+        [])
+      : [];
+    const runTrace: string[] = [
+      ...previousTrace,
+      ...(revisionNote.trim() ? ["Revision requested"] : []),
+      "Workspace provisioned",
+      `${runFiles.length} task file${runFiles.length === 1 ? "" : "s"} loaded`,
+      "Agent started prompt analysis",
+    ];
+    const saved = await persistSession({
       id: runSessionId,
       status: "running",
-      prompt,
+      prompt: runPrompt,
       files: runFiles,
+      sourceFiles,
+      environment: runtime,
+      fee: estimatedCharge,
       inputTokens: 0,
       outputTokens: 0,
       outputs: 0,
@@ -379,7 +504,8 @@ export default function WorkspaceClient({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           agentId: agent.id,
-          prompt,
+          sessionId: runSessionId,
+          prompt: runPrompt,
           files: files.map(({ name, content }) => ({ name, content })),
           environment: runtime,
         }),
@@ -388,26 +514,40 @@ export default function WorkspaceClient({
       await readEvents(
         response,
         (event) => {
-          if (event.type === "message")
-            setMessages((items) => [...items, String(event.data.text || "")]);
-          if (event.type === "activity")
-            setActivities((items) => [
-              ...items,
-              `Command ${event.data.status}`,
-            ]);
+          if (event.type === "message") {
+            const message = String(event.data.text || "");
+            runMessages.push(message);
+            setMessages((items) => [...items, message]);
+            runTrace.push("Agent returned a result message");
+          }
+          if (event.type === "activity") {
+            const activity = `Command ${event.data.status}`;
+            runTrace.push(activity);
+            setActivities((items) => [...items, activity]);
+          }
           if (event.type === "file_change")
             setActivities((items) => [
               ...items,
               ...(event.data.changes || []).map(
-                (change: { kind: string; path: string }) =>
-                  `${change.kind}: ${change.path}`,
+                (change: { kind: string; path: string }) => {
+                  const trace = `${change.kind}: ${change.path}`;
+                  runTrace.push(trace);
+                  return trace;
+                },
               ),
             ]);
+          if (event.type === "collecting") {
+            setCollecting(true);
+            runTrace.push("Collecting generated outputs");
+          }
           if (event.type === "complete") {
             runOutputs = event.data.files || [];
             runUsage = event.data.usage || null;
             setOutputs(runOutputs);
             setUsage(runUsage);
+            runTrace.push(
+              `${runOutputs.length} generated output${runOutputs.length === 1 ? "" : "s"} collected`,
+            );
           }
           if (event.type === "error") {
             executionError = String(
@@ -423,37 +563,50 @@ export default function WorkspaceClient({
           "Execution cancelled. Adjust the task if needed, then run the agent again.",
         );
         setStage("estimate");
-        void persistSession({
+        await persistSession({
           id: runSessionId,
           status: "cancelled",
-          prompt,
+          prompt: runPrompt,
           files: runFiles,
+          environment: runtime,
+          fee: estimatedCharge,
           inputTokens: tokenCount(runUsage, "input_tokens"),
           outputTokens: tokenCount(runUsage, "output_tokens"),
           outputs: runOutputs.length,
+          result: runMessages.join("\n\n"),
+          trace: runTrace,
         });
       } else if (executionError) {
         setStage("estimate");
-        void persistSession({
+        await persistSession({
           id: runSessionId,
           status: "failed",
-          prompt,
+          prompt: runPrompt,
           files: runFiles,
+          environment: runtime,
+          fee: estimatedCharge,
           inputTokens: tokenCount(runUsage, "input_tokens"),
           outputTokens: tokenCount(runUsage, "output_tokens"),
           outputs: runOutputs.length,
+          result: runMessages.join("\n\n"),
+          trace: runTrace,
         });
       } else {
-        setStage("review");
-        void persistSession({
+        await persistSession({
           id: runSessionId,
           status: "review",
-          prompt,
+          prompt: runPrompt,
           files: runFiles,
+          sourceFiles,
+          environment: runtime,
+          fee: estimatedCharge,
           inputTokens: tokenCount(runUsage, "input_tokens"),
           outputTokens: tokenCount(runUsage, "output_tokens"),
           outputs: runOutputs.length,
+          result: runMessages.join("\n\n"),
+          trace: runTrace,
         });
+        setStage("review");
       }
     } catch (reason) {
       if (abort.signal.aborted) {
@@ -461,34 +614,50 @@ export default function WorkspaceClient({
           "Execution cancelled. Adjust the task if needed, then run the agent again.",
         );
         setStage("estimate");
-        void persistSession({
+        await persistSession({
           id: runSessionId,
           status: "cancelled",
-          prompt,
+          prompt: runPrompt,
           files: runFiles,
+          environment: runtime,
+          fee: estimatedCharge,
           inputTokens: tokenCount(runUsage, "input_tokens"),
           outputTokens: tokenCount(runUsage, "output_tokens"),
           outputs: runOutputs.length,
+          result: runMessages.join("\n\n"),
+          trace: runTrace,
         });
       } else {
         setError(
           reason instanceof Error ? reason.message : "Agent execution failed.",
         );
         setStage("estimate");
-        void persistSession({
+        await persistSession({
           id: runSessionId,
           status: "failed",
-          prompt,
+          prompt: runPrompt,
           files: runFiles,
+          environment: runtime,
+          fee: estimatedCharge,
           inputTokens: tokenCount(runUsage, "input_tokens"),
           outputTokens: tokenCount(runUsage, "output_tokens"),
           outputs: runOutputs.length,
+          result: runMessages.join("\n\n"),
+          trace: runTrace,
         });
       }
     } finally {
       abortRef.current = null;
     }
   };
+
+  const resumeStartedRef = useRef(false);
+  useEffect(() => {
+    if (!resume || resumeStartedRef.current) return;
+    resumeStartedRef.current = true;
+    setRejectNote("");
+    void startCodex(resume.revisionNote);
+  }, [resume]);
 
   const download = (file: OutputFile) => {
     const url = URL.createObjectURL(
@@ -501,11 +670,16 @@ export default function WorkspaceClient({
     URL.revokeObjectURL(url);
   };
 
-  const rejectResult = () => {
-    const note =
-      rejectNote.trim() ||
-      "Please revise the previous result and address the issues I found.";
-    void persistSession({
+  const rejectResult = async () => {
+    const note = rejectNote.trim();
+    if (!note) {
+      setError(
+        "Add a revision note explaining why this result is being rejected.",
+      );
+      return;
+    }
+    setStage("complete");
+    const saved = await persistSession({
       id: activeSessionId,
       status: "rejected",
       prompt,
@@ -513,19 +687,23 @@ export default function WorkspaceClient({
       inputTokens: usage?.input_tokens ?? 0,
       outputTokens: usage?.output_tokens ?? 0,
       outputs: outputs.length,
+      environment: runtime,
+      fee: estimatedCharge,
+      result: messages.join("\n\n"),
+      trace: [...activities, `Rejected: ${note}`],
+      reviewNote: note,
     });
-    setPrompt(
-      (current) =>
-        `${current}\n\nRevision request based on the rejected result:\n${note}`,
-    );
-    setRejectNote("");
-    setStage("task");
-    setError("");
+    if (!saved) {
+      setStage("review");
+      setError("Could not save the rejection status. Please retry.");
+      return;
+    }
+    await cleanupAgentHistory();
   };
 
-  const acceptResult = () => {
+  const acceptResult = async () => {
     setStage("complete");
-    void persistSession({
+    const saved = await persistSession({
       id: activeSessionId,
       status: "accepted",
       prompt,
@@ -533,7 +711,17 @@ export default function WorkspaceClient({
       inputTokens: usage?.input_tokens ?? 0,
       outputTokens: usage?.output_tokens ?? 0,
       outputs: outputs.length,
+      environment: runtime,
+      fee: estimatedCharge,
+      result: messages.join("\n\n"),
+      trace: activities,
     });
+    if (!saved) {
+      setStage("review");
+      setError("Could not save the acceptance status. Please retry.");
+      return;
+    }
+    await cleanupAgentHistory();
   };
 
   const cancelExecution = () => {
@@ -672,7 +860,11 @@ export default function WorkspaceClient({
                       : stage === "running"
                         ? "Working in an isolated workspace"
                         : stage === "complete"
-                          ? "Task accepted"
+                          ? sessions.find(
+                              (session) => session.id === activeSessionId,
+                            )?.status === "rejected"
+                            ? "Result rejected"
+                            : "Task accepted"
                           : "Review Agent’s result"}
               </h1>
               <p className="mt-2 max-w-2xl text-[13px] leading-relaxed text-muted-foreground">
@@ -683,6 +875,39 @@ export default function WorkspaceClient({
                     : "Your prompt and files are sent to Agent AI only after you confirm the payment."}
               </p>
             </div>
+            {(stage === "review" || stage === "complete") && (
+              <div className="bai-card p-5">
+                <div className="flex items-center gap-2">
+                  <GitBranch className="h-4 w-4 text-primary" />
+                  <p className="text-xs font-semibold">Run trace · pipeline</p>
+                  <span className="ml-auto font-mono text-[9px] text-muted-foreground">
+                    {activeSessionId}
+                  </span>
+                </div>
+                <ol className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
+                  {pipelineSteps.map((step, index) => (
+                    <li
+                      key={step.label}
+                      className="flex items-start gap-2 rounded-xl bg-paper/65 p-3"
+                    >
+                      <span
+                        className={`grid h-6 w-6 shrink-0 place-items-center rounded-full border ${step.done ? "border-emerald-500 bg-emerald-500 text-white" : "border-ink/15 text-muted-foreground"}`}
+                      >
+                        {step.done ? <Check className="h-3 w-3" /> : index + 1}
+                      </span>
+                      <span className="min-w-0">
+                        <span className="block text-[10.5px] font-semibold">
+                          {step.label}
+                        </span>
+                        <span className="mt-1 block text-[9px] leading-relaxed text-muted-foreground">
+                          {step.detail}
+                        </span>
+                      </span>
+                    </li>
+                  ))}
+                </ol>
+              </div>
+            )}
             {error && (
               <div
                 role="alert"
@@ -1196,10 +1421,8 @@ export default function WorkspaceClient({
                       Ready for review
                     </span>
                   </div>
-                  <div className="mt-4 whitespace-pre-wrap rounded-xl border border-ink/8 bg-white p-4 text-xs leading-relaxed">
-                    {messages.length
-                      ? messages.join("\n\n")
-                      : "Agent completed without a text response."}
+                  <div className="mt-4 rounded-xl border border-ink/8 bg-white p-4">
+                    <AgentResult content={messages.join("\n\n")} />
                   </div>
                   <div className="mt-3 grid gap-3 sm:grid-cols-2">
                     <div className="rounded-xl bg-paper/80 p-3.5">
@@ -1260,23 +1483,37 @@ export default function WorkspaceClient({
                   <label className="block text-xs font-semibold">
                     Revision note{" "}
                     <span className="font-normal text-muted-foreground">
-                      (optional if rejecting)
+                      (required for Reject or Update Result)
                     </span>
                     <textarea
                       className="mt-2 min-h-20 w-full rounded-xl border border-ink/12 bg-white p-3 text-xs"
                       placeholder="Tell Agent what to change…"
                       value={rejectNote}
                       onChange={(event) => setRejectNote(event.target.value)}
+                      maxLength={4000}
+                      required
                     />
                   </label>
-                  <div className="mt-4 flex flex-wrap justify-between gap-3">
-                    <Button variant="line" onClick={rejectResult}>
+                  <div className="mt-4 flex flex-wrap justify-end gap-3">
+                    <Button
+                      variant="danger"
+                      onClick={() => void rejectResult()}
+                      disabled={!rejectNote.trim()}
+                    >
                       <RotateCcw className="h-3.5 w-3.5" />
-                      Reject & return task
+                      Reject
                     </Button>
-                    <Button onClick={acceptResult}>
+                    <Button
+                      variant="line"
+                      onClick={() => void startCodex(rejectNote)}
+                      disabled={!rejectNote.trim()}
+                    >
+                      <RotateCcw className="h-3.5 w-3.5" />
+                      Update Result
+                    </Button>
+                    <Button onClick={() => void acceptResult()}>
                       <Check className="h-3.5 w-3.5" />
-                      Accept result
+                      Accept
                     </Button>
                   </div>
                 </div>
@@ -1288,17 +1525,25 @@ export default function WorkspaceClient({
                 <span className="grid h-12 w-12 place-items-center rounded-2xl bg-emerald-100 text-emerald-700">
                   <CheckCircle2 className="h-6 w-6" />
                 </span>
-                <p className="label mt-5">Task accepted</p>
+                <p className="label mt-5">
+                  {sessions.find((session) => session.id === activeSessionId)
+                    ?.status === "rejected"
+                    ? "Result rejected"
+                    : "Task accepted"}
+                </p>
                 <h2 className="mt-2 font-display text-2xl font-bold">
                   Your review is complete.
                 </h2>
                 <p className="mt-2 max-w-xl text-xs leading-relaxed text-muted-foreground">
-                  Accepted files are ready to download. Run Agent data cleanup
-                  before starting another task to remove the prompt, files, and
-                  thread history Agent stored on this server. Your session
-                  history at the bottom is a separate user activity log and is
-                  kept.
+                  {sessions.find((session) => session.id === activeSessionId)
+                    ?.status === "rejected"
+                    ? "This result was rejected. Agent runtime data has been cleaned and the review status is recorded in run history."
+                    : "This result was accepted. Agent runtime data has been cleaned and the review status is recorded in run history."}
                 </p>
+                <div className="mt-5 rounded-xl border border-ink/8 bg-white p-4">
+                  <p className="label mb-3">Agent result</p>
+                  <AgentResult content={messages.join("\n\n")} />
+                </div>
                 {outputs.length > 0 && (
                   <div className="mt-5 space-y-2">
                     {outputs.map((file, index) => (
@@ -1328,13 +1573,13 @@ export default function WorkspaceClient({
                   ) : (
                     <Button variant="line" onClick={() => setCleanupOpen(true)}>
                       <DatabaseZap className="h-3.5 w-3.5" />
-                      Data cleanup
+                      Retry data cleanup
                     </Button>
                   )}
                   <p className="text-[10.5px] text-muted-foreground">
                     {cleanupDone
-                      ? "Agent runtime data cleaned. Your session history is still available below."
-                      : "Clean Agent runtime data before starting another task. Session history is kept."}
+                      ? "Agent runtime data cleaned. Your run history is still available below."
+                      : "Cleanup did not finish. Retry to remove Agent runtime data."}
                   </p>
                 </div>
               </div>
@@ -1343,11 +1588,7 @@ export default function WorkspaceClient({
         </div>
 
         <div className="mt-7">
-          <SessionHistory
-            sessions={sessions}
-            onDelete={deleteSessionRecord}
-            onCleanup={cleanupAgentHistory}
-          />
+          <SessionHistory sessions={sessions} onDelete={deleteSessionRecord} />
         </div>
       </main>
 

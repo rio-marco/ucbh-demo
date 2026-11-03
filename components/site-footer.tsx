@@ -63,7 +63,7 @@ export default function SiteFooter() {
           <p>© {year} UCBH. All rights reserved.</p>
           <p className="inline-flex items-center gap-1.5 leading-relaxed">
             <ShieldCheck className="h-3.5 w-3.5 text-primary" />
-            Runs are isolated · session history is managed in the workspace.
+            Runs are isolated · run history is managed in the workspace.
           </p>
         </div>
       </div>

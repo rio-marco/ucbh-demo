@@ -26,10 +26,16 @@ export type SessionRecord = {
   status: SessionStatus;
   prompt: string;
   files: SessionFile[];
+  sourceFiles?: { name: string; content: string; size: number }[];
   inputTokens: number;
   outputTokens: number;
   totalTokens: number;
   outputs: number;
+  environment: "private" | "shared";
+  fee: number;
+  result: string;
+  reviewNote: string;
+  trace: string[];
   createdAt: string;
   updatedAt: string;
 };

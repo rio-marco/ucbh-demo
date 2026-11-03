@@ -67,6 +67,30 @@ export async function POST(request: Request) {
   const outputTokens =
     typeof body.outputTokens === "number" ? body.outputTokens : 0;
   const outputs = typeof body.outputs === "number" ? body.outputs : 0;
+  const environment = body.environment === "shared" ? "shared" : "private";
+  const fee = typeof body.fee === "number" ? Math.max(0, body.fee) : 0;
+  const result = typeof body.result === "string" ? body.result.slice(0, 50_000) : "";
+  const reviewNote = typeof body.reviewNote === "string" ? body.reviewNote.slice(0, 20_000) : "";
+  const trace = Array.isArray(body.trace)
+    ? body.trace.filter((entry): entry is string => typeof entry === "string").slice(-200)
+    : [];
+  const sourceFiles = Array.isArray(body.sourceFiles)
+    ? body.sourceFiles
+        .filter((file): file is { name: string; content: string; size: number } =>
+          Boolean(file) &&
+          typeof (file as { name?: unknown }).name === "string" &&
+          typeof (file as { content?: unknown }).content === "string" &&
+          typeof (file as { size?: unknown }).size === "number")
+        .slice(0, 10)
+        .map((file) => ({ ...file }))
+    : undefined;
+  if (
+    sourceFiles &&
+    (sourceFiles.some((file) => file.content.length > 2_000_000) ||
+      sourceFiles.reduce((total, file) => total + file.content.length, 0) > 8_000_000)
+  ) {
+    return bad("Saved task files exceed the run storage limit.");
+  }
 
   const session = await upsertSession({
     id,
@@ -82,9 +106,16 @@ export async function POST(request: Request) {
     inputTokens,
     outputTokens,
     outputs,
+    environment,
+    fee,
+    result,
+    reviewNote,
+    trace,
+    sourceFiles,
   });
 
-  return Response.json({ session });
+  const { sourceFiles: _sourceFiles, ...publicSession } = session;
+  return Response.json({ session: publicSession });
 }
 
 export async function DELETE(request: Request) {
