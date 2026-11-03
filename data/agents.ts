@@ -14,9 +14,7 @@ export const AGENTS: Agent[] = [
       "Stock risk review",
       "Recommendation drafting",
     ],
-    prompts: [
-      "Analyze the uploaded data, explain the key findings, and create any useful output files.",
-    ],
+    prompts: [""],
   },
   {
     id: "ledger",
@@ -26,9 +24,7 @@ export const AGENTS: Agent[] = [
     tagline:
       "Review invoice data for duplicates, missing fields, and unusual variances.",
     capabilities: ["Duplicate review", "Variance analysis", "Audit summary"],
-    prompts: [
-      "Audit the uploaded invoice data, explain exceptions, and create a reviewable findings file.",
-    ],
+    prompts: [""],
   },
   {
     id: "relay",
