@@ -40,9 +40,11 @@ export async function POST(request: Request) {
   if (!id || id.length > 64) return bad("A valid session id is required.");
   if (!agent) return bad("Select a valid agent.");
 
-  const prompt = typeof body.prompt === "string" ? body.prompt.slice(0, 20_000) : "";
+  const prompt =
+    typeof body.prompt === "string" ? body.prompt.slice(0, 20_000) : "";
   const status = (
-    typeof body.status === "string" && SESSION_STATUSES.includes(body.status as SessionStatus)
+    typeof body.status === "string" &&
+    SESSION_STATUSES.includes(body.status as SessionStatus)
       ? body.status
       : "running"
   ) as SessionStatus;

@@ -5,7 +5,7 @@ import { AGENTS } from "@/data/agents";
 export default function HomePage() {
   return (
     <div className="min-h-screen">
-      <SiteHeader brand />
+      <SiteHeader />
       <main className="mx-auto max-w-6xl px-5">
         <section className="py-14 md:py-10">
           <p className="label">Agent AI · server-side execution</p>

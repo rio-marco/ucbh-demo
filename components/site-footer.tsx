@@ -5,47 +5,39 @@ import { AGENTS } from "@/data/agents";
 
 const year = new Date().getFullYear();
 
-const PLATFORM_LINKS = [
-  { label: "Dashboard", href: "/" },
-  { label: "Agent profiles", href: "/#agents" },
-  { label: "Data handling", href: "/#data-handling" },
-];
+const PLATFORM_LINKS = [{ label: "Dashboard", href: "/" }];
 
 export default function SiteFooter() {
   return (
-    <footer className="border-t border-ink/10 bg-white/55">
-      <div className="mx-auto max-w-6xl px-5 py-10 md:py-12">
-        <div className="grid gap-8 md:grid-cols-[1.4fr_1fr_1fr] md:gap-12">
+    <footer className="mt-auto border-t border-ink/10 bg-white/75">
+      <div className="mx-auto max-w-6xl px-5 py-9 md:py-11">
+        <div className="grid gap-9 sm:grid-cols-2 md:grid-cols-[1.5fr_0.75fr_1fr] md:gap-14">
           <div>
             <Link href="/" aria-label="UCBH home" className="inline-flex">
               <Logo />
             </Link>
-            <p className="mt-4 max-w-xs text-[12.5px] leading-relaxed text-muted-foreground">
-              A focused agent platform for running Agent AI against uploaded
-              data in temporary, isolated workspaces.
+            <p className="mt-4 max-w-sm text-[12.5px] leading-relaxed text-muted-foreground">
+              A secure workspace for running AI agents against uploaded data,
+              with each run contained in an isolated session.
             </p>
-            <div className="mt-5 inline-flex items-center gap-2 rounded-lg border border-ink/10 bg-white/70 px-2.5 py-1.5 font-mono text-[9px] uppercase tracking-[0.12em] text-muted-foreground">
-              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-              Systems operational
-            </div>
           </div>
 
           <nav aria-label="Platform">
-            <p className="label">Platform</p>
-            <ul className="mt-3 space-y-2 text-[12.5px] text-muted-foreground">
+            <p className="font-display text-xs font-bold">Platform</p>
+            <ul className="mt-4 space-y-2.5 text-[12.5px] text-muted-foreground">
               {PLATFORM_LINKS.map((link) => (
                 <li key={link.href}>
-                  <Link href={link.href} className="hover:text-ink">
+                  <a href={link.href} className="hover:text-ink">
                     {link.label}
-                  </Link>
+                  </a>
                 </li>
               ))}
             </ul>
           </nav>
 
           <nav aria-label="Agents">
-            <p className="label">Agents</p>
-            <ul className="mt-3 space-y-2 text-[12.5px] text-muted-foreground">
+            <p className="font-display text-xs font-bold">Agents</p>
+            <ul className="mt-4 space-y-2.5 text-[12.5px] text-muted-foreground">
               {AGENTS.map((agent) => (
                 <li key={agent.id}>
                   <Link
@@ -67,11 +59,11 @@ export default function SiteFooter() {
           </nav>
         </div>
 
-        <div className="mt-9 flex flex-col gap-3 border-t border-ink/10 pt-5 text-[10.5px] text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
+        <div className="mt-9 flex flex-col gap-3 border-t border-ink/10 pt-5 text-[11px] text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
           <p>© {year} UCBH. All rights reserved.</p>
-          <p className="inline-flex items-center gap-1.5">
+          <p className="inline-flex items-center gap-1.5 leading-relaxed">
             <ShieldCheck className="h-3.5 w-3.5 text-primary" />
-            Isolated workspaces · session data stays with the agent runtime.
+            Runs are isolated · session history is managed in the workspace.
           </p>
         </div>
       </div>

@@ -40,7 +40,9 @@ function openDatabase(file: string) {
 function hasTable(database: DatabaseSync, table: string) {
   return Boolean(
     database
-      .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?")
+      .prepare(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?",
+      )
       .get(table),
   );
 }

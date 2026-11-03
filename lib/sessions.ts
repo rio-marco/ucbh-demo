@@ -1,10 +1,6 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import type {
-  SessionRecord,
-  SessionStats,
-  SessionStatus,
-} from "@/lib/types";
+import type { SessionRecord, SessionStats, SessionStatus } from "@/lib/types";
 
 const STORE_PATH = path.join(process.cwd(), ".data", "sessions.json");
 const STATUSES: SessionStatus[] = [
@@ -56,7 +52,8 @@ function normalize(record: SessionRecord): SessionRecord {
   const outputTokens = Math.max(0, Math.round(record.outputTokens || 0));
   return {
     ...record,
-    prompt: typeof record.prompt === "string" ? record.prompt.slice(0, 20_000) : "",
+    prompt:
+      typeof record.prompt === "string" ? record.prompt.slice(0, 20_000) : "",
     files: Array.isArray(record.files) ? record.files.slice(0, 10) : [],
     inputTokens,
     outputTokens,
@@ -66,7 +63,10 @@ function normalize(record: SessionRecord): SessionRecord {
 }
 
 function mutate<T>(
-  update: (sessions: SessionRecord[]) => { sessions: SessionRecord[]; result: T },
+  update: (sessions: SessionRecord[]) => {
+    sessions: SessionRecord[];
+    result: T;
+  },
 ): Promise<T> {
   const task = writeQueue.then(async () => {
     const current = await readAll();
@@ -128,7 +128,9 @@ export type SessionInput = {
   outputs?: number;
 };
 
-export async function upsertSession(input: SessionInput): Promise<SessionRecord> {
+export async function upsertSession(
+  input: SessionInput,
+): Promise<SessionRecord> {
   return mutate((sessions) => {
     const now = new Date().toISOString();
     const index = sessions.findIndex((session) => session.id === input.id);

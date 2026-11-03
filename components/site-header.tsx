@@ -3,11 +3,9 @@ import Link from "next/link";
 import Logo from "@/components/logo";
 
 export default function SiteHeader({
-  brand = false,
   children,
   actions,
 }: {
-  brand?: boolean;
   children?: ReactNode;
   actions?: ReactNode;
 }) {
@@ -16,7 +14,7 @@ export default function SiteHeader({
       <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-5 py-3.5">
         <div className="flex min-w-0 items-center gap-3">
           <Link href="/" aria-label="UCBH home" className="shrink-0">
-            <Logo compact={!brand} />
+            <Logo />
           </Link>
           {children}
         </div>

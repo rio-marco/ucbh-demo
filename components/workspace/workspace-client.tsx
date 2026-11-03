@@ -204,7 +204,9 @@ export default function WorkspaceClient({
     },
     {
       label: "Analyze prompt",
-      detail: messages.length ? "Agent reasoning in progress" : "Waiting for agent",
+      detail: messages.length
+        ? "Agent reasoning in progress"
+        : "Waiting for agent",
       done: messages.length > 0,
       active: messages.length === 0,
     },
