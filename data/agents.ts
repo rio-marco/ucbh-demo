@@ -38,8 +38,6 @@ export const AGENTS: Agent[] = [
     tagline:
       "Organize support data, surface urgent cases, and prepare a triage summary.",
     capabilities: ["Queue analysis", "Priority review", "Triage summary"],
-    prompts: [
-      "Analyze the uploaded support data, identify urgent cases and themes, and create a triage summary.",
-    ],
+    prompts: [""],
   },
 ];

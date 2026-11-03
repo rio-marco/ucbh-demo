@@ -3,12 +3,10 @@ import { notFound } from "next/navigation";
 import {
   ArrowLeft,
   Check,
-  CheckCircle2,
   Clock3,
   Coins,
   DatabaseZap,
   FileText,
-  GitBranch,
   Layers3,
   ShieldCheck,
 } from "lucide-react";
@@ -112,15 +110,12 @@ function RunTrace({ session }: { session: SessionRecord }) {
           Run-{session.id}
         </span>
       </div>
-      <ol className="mt-6 grid gap-0 md:grid-cols-2 xl:grid-cols-3">
+      <ol className="mt-6">
         {steps.map((step, index) => (
-          <li
-            key={step.title}
-            className="relative flex min-h-[104px] gap-3 pb-5 pr-4"
-          >
+          <li key={step.title} className="relative flex gap-3 pb-5 last:pb-0">
             {index < steps.length - 1 && (
               <span
-                className={`absolute left-[15px] top-8 hidden h-[calc(100%-1.2rem)] w-px md:block ${step.done ? "bg-emerald-300" : "bg-ink/10"}`}
+                className={`absolute left-[15px] top-8 h-[calc(100%-1.2rem)] w-px ${step.done ? "bg-emerald-300" : "bg-ink/10"}`}
               />
             )}
             <span
@@ -143,23 +138,6 @@ function RunTrace({ session }: { session: SessionRecord }) {
           </li>
         ))}
       </ol>
-      {session.trace.length > 0 && (
-        <details className="mt-2 border-t border-ink/8 pt-3">
-          <summary className="cursor-pointer text-[10px] font-medium text-muted-foreground">
-            Execution event details ({session.trace.length})
-          </summary>
-          <ul className="mt-3 space-y-1.5 pl-4">
-            {session.trace.slice(-12).map((entry, index) => (
-              <li
-                key={`${entry}-${index}`}
-                className="list-disc text-[10px] leading-relaxed text-muted-foreground"
-              >
-                {entry}
-              </li>
-            ))}
-          </ul>
-        </details>
-      )}
     </section>
   );
 }
@@ -182,15 +160,13 @@ function DataCleanupCard({ session }: { session: SessionRecord }) {
       <div className="mt-4 space-y-3">
         <div className="flex items-start gap-3">
           <Layers3 className="mt-0.5 h-4 w-4 text-muted-foreground" />
-          <div>
-            <p className="text-[11px] font-medium">
+          <div className="min-w-0 flex-1 flex justify-between gap-2 text-[11px] font-medium">
+            <span className="truncate">Environment</span>
+            <span className="shrink-0">
               {session.environment === "private"
                 ? "Private workspace"
                 : "Shared server"}
-            </p>
-            <p className="mt-0.5 text-[10px] text-muted-foreground">
-              Isolated temporary workspace for this run
-            </p>
+            </span>
           </div>
         </div>
         <div className="flex items-start gap-3">
@@ -220,16 +196,6 @@ function DataCleanupCard({ session }: { session: SessionRecord }) {
             )}
           </div>
         </div>
-      </div>
-      <div
-        className={`mt-4 rounded-xl border p-3 text-[10px] leading-relaxed ${decided ? "border-emerald-200 bg-emerald-50/70 text-emerald-900" : "border-amber-200 bg-amber-50/70 text-amber-950"}`}
-      >
-        <ShieldCheck className="mr-1 inline h-3.5 w-3.5" />
-        {decided
-          ? "Decision recorded. Saved task-file copies and the Agent runtime history were cleaned; run summary remains in history."
-          : contentAvailable
-            ? "Task-file copies are kept while this run awaits a decision so Update Result can rerun the task. Accept or reject to clean them."
-            : "Task file contents are not available for another run. File names and run summary remain in this history record."}
       </div>
     </section>
   );
@@ -282,6 +248,38 @@ function SettlementCard({ session }: { session: SessionRecord }) {
       <p className="mt-3 text-[10px] leading-relaxed text-muted-foreground">
         A provider charge is not available in this run record.
       </p>
+    </section>
+  );
+}
+
+function RunSummaryCard({ session }: { session: SessionRecord }) {
+  const rows = [
+    ["Agent", `${session.agentName} · ${session.agentId}`],
+    [
+      "Environment",
+      session.environment === "private" ? "Private workspace" : "Shared server",
+    ],
+    ["Uploaded files", String(session.files.length)],
+    ["Generated outputs", String(session.outputs)],
+    ["Decision", statusLabel[session.status]],
+  ];
+  return (
+    <section className="bai-card p-5">
+      <div className="flex items-center gap-2">
+        <Clock3 className="h-4 w-4 text-primary" />
+        <h2 className="text-sm font-semibold">Run summary</h2>
+      </div>
+      <dl className="mt-4 divide-y divide-ink/8">
+        {rows.map(([label, value]) => (
+          <div
+            key={label}
+            className="flex justify-between gap-3 py-2.5 text-[11px]"
+          >
+            <dt className="text-muted-foreground">{label}</dt>
+            <dd className="text-right font-medium">{value}</dd>
+          </div>
+        ))}
+      </dl>
     </section>
   );
 }
@@ -347,32 +345,12 @@ export default async function RunDetailsPage({
           </span>
         </div>
 
-        <section className="grid items-start gap-5 lg:grid-cols-[0.92fr_1.08fr]">
+        <section className="grid items-start gap-5 lg:grid-cols-2">
           <div className="space-y-5">
             <RunDetailsActions
               session={publicSession}
               canUpdate={Boolean(sourceFiles?.length)}
             />
-            <DataCleanupCard session={session} />
-          </div>
-          <div className="space-y-5">
-            <section className="bai-card p-5 md:p-6">
-              <p className="label">Brief submitted</p>
-              <h2 className="mt-2 font-display text-lg font-bold">
-                Task instructions
-              </h2>
-              <p className="mt-3 whitespace-pre-wrap text-xs leading-relaxed text-ink/75">
-                {session.prompt || "No prompt was recorded."}
-              </p>
-              {session.reviewNote && (
-                <div className="mt-4 rounded-xl border border-orange-200 bg-orange-50 p-4">
-                  <p className="label">Client revision note</p>
-                  <p className="mt-2 whitespace-pre-wrap text-xs leading-relaxed">
-                    {session.reviewNote}
-                  </p>
-                </div>
-              )}
-            </section>
             <section className="bai-card p-5 md:p-6">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
@@ -395,41 +373,31 @@ export default async function RunDetailsPage({
                 />
               </div>
             </section>
+            <RunSummaryCard session={session} />
+          </div>
+          <div className="space-y-5">
+            <section className="bai-card p-5 md:p-6">
+              <p className="label">Brief submitted</p>
+              <h2 className="mt-2 font-display text-lg font-bold">
+                Task instructions
+              </h2>
+              <p className="mt-3 whitespace-pre-wrap text-xs leading-relaxed text-ink/75">
+                {session.prompt || "No prompt was recorded."}
+              </p>
+              {session.reviewNote && (
+                <div className="mt-4 rounded-xl border border-orange-200 bg-orange-50 p-4">
+                  <p className="label">Client revision note</p>
+                  <p className="mt-2 whitespace-pre-wrap text-xs leading-relaxed">
+                    {session.reviewNote}
+                  </p>
+                </div>
+              )}
+            </section>
+            <SettlementCard session={session} />
+            <DataCleanupCard session={session} />
+            <RunTrace session={session} />
           </div>
         </section>
-
-        <section className="grid gap-5 lg:grid-cols-2">
-          <SettlementCard session={session} />
-          <section className="bai-card p-5">
-            <div className="flex items-center gap-2">
-              <Clock3 className="h-4 w-4 text-primary" />
-              <h2 className="text-sm font-semibold">Run summary</h2>
-            </div>
-            <dl className="mt-4 divide-y divide-ink/8">
-              {[
-                ["Agent", `${session.agentName} · ${session.agentId}`],
-                [
-                  "Environment",
-                  session.environment === "private"
-                    ? "Private workspace"
-                    : "Shared server",
-                ],
-                ["Files", String(session.files.length)],
-                ["Generated outputs", String(session.outputs)],
-                ["Decision", statusLabel[session.status]],
-              ].map(([label, value]) => (
-                <div
-                  key={label}
-                  className="flex justify-between gap-3 py-2.5 text-[11px]"
-                >
-                  <dt className="text-muted-foreground">{label}</dt>
-                  <dd className="text-right font-medium">{value}</dd>
-                </div>
-              ))}
-            </dl>
-          </section>
-        </section>
-        <RunTrace session={session} />
       </main>
     </div>
   );

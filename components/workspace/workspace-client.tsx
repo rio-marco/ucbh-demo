@@ -1545,10 +1545,10 @@ export default function WorkspaceClient({
               <span>{money(demoBalance - estimatedCharge)}</span>
             </div>
             <div className="mt-3 border-t border-ink/8 pt-3 text-[10px] leading-relaxed text-muted-foreground">
-              Model: Agent AI (server configuration) · Runtime:{" "}
-              {runtime === "private" ? "Private workspace" : "Shared server"}.
-              Rates only; actual provider billing is separate and is not
-              collected by this app.
+              Environment:{" "}
+              <b className="text-xs">
+                {runtime === "private" ? "Private workspace" : "Shared server"}.
+              </b>
             </div>
           </div>
           <DialogFooter>
