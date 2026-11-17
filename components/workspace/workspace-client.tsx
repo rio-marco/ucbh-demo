@@ -255,7 +255,7 @@ export default function WorkspaceClient({
   const [error, setError] = useState("");
   const [demoBalance, setDemoBalance] = useState(DEMO_STARTING_BALANCE);
   const [paymentOpen, setPaymentOpen] = useState(false);
-  const [codexReady, setCodexReady] = useState<boolean | null>(null);
+  const [agentReady, setAgentReady] = useState<boolean | null>(null);
   const [rejectNote, setRejectNote] = useState("");
   const [cleanupOpen, setCleanupOpen] = useState(false);
   const [cleanupDone, setCleanupDone] = useState(false);
@@ -542,8 +542,8 @@ export default function WorkspaceClient({
   useEffect(() => {
     fetch("/api/execute", { cache: "no-store" })
       .then((response) => response.json())
-      .then((data) => setCodexReady(Boolean(data.ready)))
-      .catch(() => setCodexReady(false));
+      .then((data) => setAgentReady(Boolean(data.ready)))
+      .catch(() => setAgentReady(false));
   }, []);
 
   useEffect(() => {
@@ -659,7 +659,7 @@ export default function WorkspaceClient({
     setFiles((current) => [...current, ...loaded]);
   };
 
-  const startCodex = async (revisionNote = "") => {
+  const startAgent = async (revisionNote = "") => {
     const runPrompt = revisionNote.trim()
       ? `${prompt}\n\nRevision note for this update:\n${revisionNote.trim()}`
       : prompt;
@@ -743,7 +743,12 @@ export default function WorkspaceClient({
             runTrace.push("Agent returned a result message");
           }
           if (event.type === "activity") {
-            const activity = `Command ${event.data.status}`;
+            const tool =
+              typeof event.data.tool === "string" ? event.data.tool : "";
+            const status = String(event.data.status || "completed");
+            const activity = tool
+              ? `${tool.replace(/_/g, " ")} ${status}`
+              : `Command ${status}`;
             runTrace.push(activity);
             setActivities((items) => [...items, activity]);
           }
@@ -878,7 +883,7 @@ export default function WorkspaceClient({
     if (!resume || resumeStartedRef.current) return;
     resumeStartedRef.current = true;
     setRejectNote("");
-    void startCodex(resume.revisionNote);
+    void startAgent(resume.revisionNote);
   }, [resume]);
 
   const download = (file: OutputFile) => {
@@ -1138,14 +1143,12 @@ export default function WorkspaceClient({
                 {error}
               </div>
             )}
-            {codexReady === false && (
+            {agentReady === false && (
               <div className="flex items-start gap-2 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-xs leading-relaxed text-amber-950">
                 <LockKeyhole className="mt-0.5 h-4 w-4 shrink-0" />
                 <span>
-                  Agent isn’t ready on this server. The administrator must sign
-                  into Agent and ensure its platform runtime is installed. Users
-                  do not need to provide an API key. Payment is disabled until
-                  then.
+                  Something went wrong please try again later or contact the
+                  administrator
                 </span>
               </div>
             )}
@@ -1549,14 +1552,14 @@ export default function WorkspaceClient({
                     Back
                   </Button>
                   <Button
-                    disabled={!codexReady || estimatedCharge > demoBalance}
+                    disabled={!agentReady || estimatedCharge > demoBalance}
                     onClick={() => setPaymentOpen(true)}
                   >
                     <Play className="h-3.5 w-3.5" />
                     Run agent
                   </Button>
                 </div>
-                {codexReady === null && (
+                {agentReady === null && (
                   <p className="text-right text-[10px] text-muted-foreground">
                     Checking Agent configuration…
                   </p>
@@ -1841,7 +1844,7 @@ export default function WorkspaceClient({
                     </Button>
                     <Button
                       variant="line"
-                      onClick={() => void startCodex(rejectNote)}
+                      onClick={() => void startAgent(rejectNote)}
                       disabled={!rejectNote.trim()}
                     >
                       <RotateCcw className="h-3.5 w-3.5" />
@@ -1962,8 +1965,8 @@ export default function WorkspaceClient({
             </Button>
             <Button
               type="button"
-              onClick={() => void startCodex()}
-              disabled={!codexReady}
+              onClick={() => void startAgent()}
+              disabled={!agentReady}
             >
               <Check className="h-3.5 w-3.5" />
               Pay {money(estimatedCharge)} credits & run

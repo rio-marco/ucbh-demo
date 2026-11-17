@@ -1,6 +1,6 @@
 import type { Agent } from "@/lib/types";
 
-// Agent profiles provide task context; all execution and responses come from Agent.
+// Agent profiles provide task context; all execution and responses come from Claude.
 export const AGENTS: Agent[] = [
   {
     id: "atlas",

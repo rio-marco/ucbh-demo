@@ -1,26 +1,48 @@
-# UCBH Codex Agent Workspace
+# UCBH Claude Agent Workspace
 
-Next.js application for running the official OpenAI Codex SDK against uploaded CSV files in an isolated temporary workspace.
+Next.js application for running Claude against uploaded CSV files in an isolated temporary workspace.
 
 ## Run locally
 
 ```bash
 npm install
-codex login
+# Add your Claude key and optional model override to .env.local
+# CLAUDE_API_KEY=sk-ant-...
+# CLAUDE_MODEL=claude-sonnet-4-5-20250929
 npm run dev
 ```
 
-The server uses the Codex CLI's existing ChatGPT login stored under `CODEX_HOME` (by default `~/.codex`). Website users do not need to provide an API key. The login must be available to the server process and is never sent to the browser. An `OPENAI_API_KEY` can optionally be configured server-side instead.
+The server calls the Claude Messages API with `CLAUDE_API_KEY`. Website users do not provide an API key; it stays on the server and is never sent to the browser. `CLAUDE_AUTH_TOKEN` is also supported for bearer-token gateways. Set `CLAUDE_MODEL` (or `CLAUDE_MODEL`) to override the default model. If the primary model is unavailable or rate-limited for the key, the runner tries `CLAUDE_FALLBACK_MODELS` (comma-separated, defaults to `claude-haiku-4-5-20251001`).
 
 ## Execution boundary
 
-`POST /api/execute` accepts one to ten CSV files and a task. The server creates a mode-restricted temporary directory, starts Codex with workspace-write sandboxing, disables network and web search, streams response/file events, then deletes the workspace. SDK token usage is returned when present; the SDK does not provide provider charges or a reliable pre-run cost estimate, so the application does not invent either.
+`POST /api/execute` accepts one to ten CSV files and a task. The server creates a mode-restricted temporary directory and gives Claude file tools scoped to that directory only:
+
+- `list_files`
+- `read_file`
+- `write_file` (overwrite or append)
+
+Uploaded files are written once and cannot be overwritten. Claude reads the inputs, performs the requested analysis, writes output files, and returns a summary. The route streams `status`, `message`, `activity`, `file_change`, `collecting`, and `complete` events over SSE. The workspace is deleted after the run. Token usage from the Claude API is returned when present; provider charges and pre-run costs are not invented.
 
 Generated files can be downloaded during review. They are intentionally not applied to the website's source tree.
 
+## QuickBooks connection
+
+The workspace can also import data from QuickBooks Online using OAuth2. Configure:
+
+```bash
+QB_CLIENT_ID=...
+QB_CLIENT_SECRET=...
+QB_REDIRECT_URI=http://localhost:3000/api/quickbooks/callback
+QB_ENVIRONMENT=sandbox
+NEXTAUTH_URL=http://localhost:3000
+```
+
+Register the exact redirect URI in the Intuit developer dashboard. Development/sandbox keys allow `http://localhost`; production requires HTTPS and does not allow IP addresses or localhost.
+
 ## Current deployment gaps
 
-This repository has no user authentication, durable database, billing integration, or private execution infrastructure. Runs therefore do not have authenticated ownership or durable history. The server-side Codex login is shared by executions on that deployment; for a multi-user service, use a supported per-user ChatGPT authorization flow rather than sharing one account. Deploy behind an authenticated identity provider and add durable per-user result storage and billing data before using it for multiple users or charging for runs.
+This repository has no user authentication, durable database, billing integration, or private execution infrastructure. Runs therefore do not have authenticated ownership or durable history. The server-side Claude key is shared by executions on that deployment; for a multi-user service, add per-user authorization and durable result storage before charging for runs.
 
 ## Checks
 
