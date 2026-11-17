@@ -11,7 +11,7 @@ export function getQBConfig() {
   const clientSecret = process.env.QB_CLIENT_SECRET || "";
   const redirectUri =
     process.env.QB_REDIRECT_URI ||
-    "http://localhost:3000/api/quickbooks/callback";
+    "https://expugnable-gnomically-reinaldo.ngrok-free.dev/api/quickbooks/callback";
   const environment = (process.env.QB_ENVIRONMENT || "sandbox") as
     | "sandbox"
     | "production";

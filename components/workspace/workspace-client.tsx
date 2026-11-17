@@ -383,6 +383,7 @@ export default function WorkspaceClient({
     try {
       const response = await fetch("/api/quickbooks/status", {
         cache: "no-store",
+        signal: AbortSignal.timeout(10_000),
       });
       const data = (await response.json()) as {
         connected?: boolean;
