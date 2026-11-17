@@ -273,6 +273,7 @@ export default function WorkspaceClient({
   const [qbError, setQbError] = useState("");
   const abortRef = useRef<AbortController | null>(null);
   const traceRef = useRef<HTMLDivElement | null>(null);
+  const qbAutoImportRef = useRef(false);
   const inputEstimate =
     10_000 +
     Math.ceil(
@@ -500,6 +501,7 @@ export default function WorkspaceClient({
       setQbRealmId(null);
       setQbSummary(null);
       setQbImported(false);
+      qbAutoImportRef.current = false;
       setFiles((current) =>
         current.filter((file) => !file.name.startsWith("quickbooks-")),
       );
@@ -526,7 +528,6 @@ export default function WorkspaceClient({
       if (cancelled) return;
       if (connected && qb === "connected") {
         setQbDialogOpen(true);
-        await importQuickBooksData();
       }
       if (qb) stripQbParams();
     };
@@ -538,6 +539,19 @@ export default function WorkspaceClient({
     // Runs once on mount: the query string is the OAuth callback signal.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    if (stage !== "task" || !qbConnected || qbDataLoading || qbImported) {
+      return;
+    }
+    if (files.length > 0 || qbAutoImportRef.current) return;
+    // QuickBooks remains connected across tasks, but its CSV files only live
+    // in this page's state. Re-import automatically so returning users are
+    // not left with an empty attachment list and a disabled Continue button.
+    qbAutoImportRef.current = true;
+    void importQuickBooksData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stage, qbConnected, qbDataLoading, qbImported, files.length]);
 
   useEffect(() => {
     fetch("/api/execute", { cache: "no-store" })
@@ -623,6 +637,7 @@ export default function WorkspaceClient({
     setError("");
     setCleanupDone(false);
     setQbImported(false);
+    qbAutoImportRef.current = false;
     setRunProgress(0);
     setActiveSessionId(createSessionId());
   };
