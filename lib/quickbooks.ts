@@ -9,14 +9,46 @@ import { randomBytes } from "node:crypto";
 export function getQBConfig() {
   const clientId = process.env.QB_CLIENT_ID || "";
   const clientSecret = process.env.QB_CLIENT_SECRET || "";
-  const redirectUri =
-    process.env.QB_REDIRECT_URI ||
-    "https://expugnable-gnomically-reinaldo.ngrok-free.dev/api/quickbooks/callback";
+  const redirectUri = process.env.QB_REDIRECT_URI || "";
   const environment = (process.env.QB_ENVIRONMENT || "sandbox") as
     | "sandbox"
     | "production";
 
   return { clientId, clientSecret, redirectUri, environment };
+}
+
+/** Resolve the public origin of the current request, including behind tunnels. */
+export function getRequestOrigin(request: Request): string {
+  const url = new URL(request.url);
+  const forwardedHost = request.headers
+    .get("x-forwarded-host")
+    ?.split(",")[0]
+    ?.trim();
+  const forwardedProto = request.headers
+    .get("x-forwarded-proto")
+    ?.split(",")[0]
+    ?.trim();
+  const host = forwardedHost || request.headers.get("host") || url.host;
+  const proto = forwardedProto || url.protocol.replace(":", "");
+  return `${proto}://${host}`;
+}
+
+/**
+ * Use the configured redirect URI when it matches the origin the user is
+ * currently on; otherwise derive it. This keeps localhost and tunnel previews
+ * working without editing `.env` for every host.
+ */
+export function getRedirectUri(request: Request): string {
+  const origin = getRequestOrigin(request);
+  const configured = process.env.QB_REDIRECT_URI?.trim();
+  if (configured) {
+    try {
+      if (new URL(configured).origin === origin) return configured;
+    } catch {
+      // Fall through to the derived URI if the configured value is invalid.
+    }
+  }
+  return `${origin}/api/quickbooks/callback`;
 }
 
 /** Intuit OAuth2 endpoints */
@@ -175,8 +207,9 @@ export function isTokenExpired(tokens: QBTokens): boolean {
 export async function exchangeCodeForTokens(
   code: string,
   realmId: string,
+  redirectUri: string,
 ): Promise<QBTokens> {
-  const { clientId, clientSecret, redirectUri } = getQBConfig();
+  const { clientId, clientSecret } = getQBConfig();
   const basicAuth = Buffer.from(`${clientId}:${clientSecret}`).toString(
     "base64",
   );

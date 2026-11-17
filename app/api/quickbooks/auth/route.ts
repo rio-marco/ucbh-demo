@@ -1,5 +1,6 @@
 import {
   getQBConfig,
+  getRedirectUri,
   generateState,
   sanitizeReturnTo,
   INTUIT_AUTH_URL,
@@ -17,7 +18,8 @@ export const dynamic = "force-dynamic";
  * log in on Intuit's site and authorize the app.
  */
 export async function GET(request: Request) {
-  const { clientId, clientSecret, redirectUri } = getQBConfig();
+  const { clientId, clientSecret } = getQBConfig();
+  const redirectUri = getRedirectUri(request);
 
   if (!clientId || !clientSecret || clientId === "your_client_id_here") {
     return Response.json(

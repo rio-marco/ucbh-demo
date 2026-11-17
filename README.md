@@ -35,10 +35,11 @@ QB_CLIENT_ID=...
 QB_CLIENT_SECRET=...
 QB_REDIRECT_URI=http://localhost:3000/api/quickbooks/callback
 QB_ENVIRONMENT=sandbox
-NEXTAUTH_URL=http://localhost:3000
 ```
 
-Register the exact redirect URI in the Intuit developer dashboard. Development/sandbox keys allow `http://localhost`; production requires HTTPS and does not allow IP addresses or localhost.
+The callback URL is derived from the origin the browser is using, so localhost and tunnel previews (ngrok, Cloudflare Tunnel) both work. If `QB_REDIRECT_URI` matches the current origin it is used as-is; otherwise the app builds `<current-origin>/api/quickbooks/callback`.
+
+Register **every** redirect URI you use in the Intuit developer dashboard, exactly matching scheme, host, port, and path. Development/sandbox keys allow `http://localhost`; production and tunnel URLs require HTTPS. A random free ngrok URL changes on restart, so use a static tunnel domain if you need a stable callback.
 
 ## Current deployment gaps
 

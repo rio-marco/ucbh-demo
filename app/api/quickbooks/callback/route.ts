@@ -1,6 +1,8 @@
 import {
   consumeState,
   exchangeCodeForTokens,
+  getRedirectUri,
+  getRequestOrigin,
   saveTokens,
   sanitizeReturnTo,
 } from "@/lib/quickbooks";
@@ -36,8 +38,9 @@ export async function GET(request: Request) {
   const stateRecord = state ? await consumeState(state) : null;
   const returnTo = stateRecord?.returnTo || "/";
 
-  // Base URL for redirecting back to the app
-  const baseUrl = process.env.NEXTAUTH_URL || url.origin;
+  // Base URL for redirecting back to the app. Derive it from the request so
+  // OAuth works on localhost, LAN IPs, and tunnel hosts without env edits.
+  const baseUrl = getRequestOrigin(request);
 
   // User denied access or Intuit returned an error
   if (error) {
@@ -68,8 +71,13 @@ export async function GET(request: Request) {
   }
 
   try {
-    // Exchange code for access + refresh tokens
-    const tokens = await exchangeCodeForTokens(code, realmId);
+    // Exchange code for access + refresh tokens using the same redirect URI
+    // that was sent to Intuit in the authorization request.
+    const tokens = await exchangeCodeForTokens(
+      code,
+      realmId,
+      getRedirectUri(request),
+    );
     await saveTokens(tokens);
 
     // Redirect back to the page the user started the connection from.
