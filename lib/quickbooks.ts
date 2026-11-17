@@ -20,8 +20,8 @@ export function getQBConfig() {
 }
 
 /** Intuit OAuth2 endpoints */
-export const INTUIT_AUTH_URL =
-  "https://appcenter.intuit.com/connect/oauth2";
+export const INTUIT_AUTH_URL = "https://appcenter.intuit.com/connect/oauth2";
+
 export const INTUIT_TOKEN_URL =
   "https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer";
 
@@ -41,33 +41,84 @@ export const QB_SCOPES = "com.intuit.quickbooks.accounting";
 const DATA_DIR = path.join(process.cwd(), ".data");
 const STATE_FILE = path.join(DATA_DIR, "quickbooks-state.json");
 
+export type QBStateRecord = {
+  state: string;
+  returnTo: string;
+  createdAt: string;
+};
+
 async function ensureDataDir() {
   await mkdir(DATA_DIR, { recursive: true });
 }
 
+/**
+ * Only allow same-origin relative paths as OAuth return destinations.
+ * This prevents the callback from being used as an open redirect.
+ */
+export function sanitizeReturnTo(value: string | null | undefined): string {
+  if (!value) return "/";
+
+  let decoded = value;
+
+  try {
+    decoded = decodeURIComponent(value);
+  } catch {
+    // Keep the original value if it is not valid percent-encoding.
+  }
+
+  if (
+    !decoded.startsWith("/") ||
+    decoded.startsWith("//") ||
+    decoded.includes("\\")
+  ) {
+    return "/";
+  }
+
+  return decoded;
+}
+
 /** Generate a random state string and persist it for validation. */
-export async function generateState(): Promise<string> {
+export async function generateState(returnTo = "/"): Promise<string> {
   const state = randomBytes(24).toString("hex");
+
   await ensureDataDir();
-  await writeFile(
-    STATE_FILE,
-    JSON.stringify({ state, createdAt: new Date().toISOString() }),
-    "utf8",
-  );
+
+  const record: QBStateRecord = {
+    state,
+    returnTo: sanitizeReturnTo(returnTo),
+    createdAt: new Date().toISOString(),
+  };
+
+  await writeFile(STATE_FILE, JSON.stringify(record), "utf8");
+
   return state;
+}
+
+/**
+ * Validate and consume the state stored before the OAuth redirect.
+ * Returns the stored record (including the return path) or null.
+ */
+export async function consumeState(
+  state: string,
+): Promise<QBStateRecord | null> {
+  try {
+    const raw = await readFile(STATE_FILE, "utf8");
+    const stored = JSON.parse(raw) as QBStateRecord;
+
+    // Clean up after validation, whether it matched or not.
+    await unlink(STATE_FILE).catch(() => {});
+
+    if (!stored?.state || stored.state !== state) return null;
+
+    return { ...stored, returnTo: sanitizeReturnTo(stored.returnTo) };
+  } catch {
+    return null;
+  }
 }
 
 /** Validate that the returned state matches the one we stored. */
 export async function validateState(state: string): Promise<boolean> {
-  try {
-    const raw = await readFile(STATE_FILE, "utf8");
-    const stored = JSON.parse(raw) as { state: string };
-    // Clean up after validation
-    await unlink(STATE_FILE).catch(() => {});
-    return stored.state === state;
-  } catch {
-    return false;
-  }
+  return (await consumeState(state)) !== null;
 }
 
 // ---------------------------------------------------------------------------

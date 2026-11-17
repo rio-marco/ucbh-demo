@@ -49,42 +49,32 @@ export async function GET(request: Request) {
 
     // Company Info (always fetched for context)
     if (type === "all" || type === "company") {
-      await query(
-        `companyinfo/${currentTokens.realm_id}`,
-        "companyInfo",
-      );
+      await query(`companyinfo/${currentTokens.realm_id}`, "companyInfo");
     }
+
+    const entityQuery = (entity: string) =>
+      `query?query=${encodeURIComponent(
+        `SELECT * FROM ${entity} MAXRESULTS 100`,
+      )}`;
 
     // Customers
     if (type === "all" || type === "customers") {
-      await query(
-        "query?query=SELECT * FROM Customer MAXRESULTS 100",
-        "customers",
-      );
+      await query(entityQuery("Customer"), "customers");
     }
 
     // Vendors
     if (type === "all" || type === "vendors") {
-      await query(
-        "query?query=SELECT * FROM Vendor MAXRESULTS 100",
-        "vendors",
-      );
+      await query(entityQuery("Vendor"), "vendors");
     }
 
     // Items (Products / Inventory)
     if (type === "all" || type === "items") {
-      await query(
-        "query?query=SELECT * FROM Item MAXRESULTS 100",
-        "items",
-      );
+      await query(entityQuery("Item"), "items");
     }
 
     // Invoices
     if (type === "all" || type === "invoices") {
-      await query(
-        "query?query=SELECT * FROM Invoice MAXRESULTS 100",
-        "invoices",
-      );
+      await query(entityQuery("Invoice"), "invoices");
     }
 
     // Financial reports
@@ -116,7 +106,10 @@ export async function GET(request: Request) {
   } catch (error) {
     console.error("QuickBooks data fetch error:", error);
     return Response.json(
-      { error: "Failed to fetch QuickBooks data. The connection may have expired." },
+      {
+        error:
+          "Failed to fetch QuickBooks data. The connection may have expired.",
+      },
       { status: 500 },
     );
   }

@@ -1,6 +1,7 @@
 import {
   getQBConfig,
   generateState,
+  sanitizeReturnTo,
   INTUIT_AUTH_URL,
   QB_SCOPES,
 } from "@/lib/quickbooks";
@@ -15,10 +16,10 @@ export const dynamic = "force-dynamic";
  * The frontend redirects the browser to this URL so the user can
  * log in on Intuit's site and authorize the app.
  */
-export async function GET() {
-  const { clientId, redirectUri } = getQBConfig();
+export async function GET(request: Request) {
+  const { clientId, clientSecret, redirectUri } = getQBConfig();
 
-  if (!clientId || clientId === "your_client_id_here") {
+  if (!clientId || !clientSecret || clientId === "your_client_id_here") {
     return Response.json(
       {
         error:
@@ -28,7 +29,9 @@ export async function GET() {
     );
   }
 
-  const state = await generateState();
+  const url = new URL(request.url);
+  const returnTo = sanitizeReturnTo(url.searchParams.get("returnTo"));
+  const state = await generateState(returnTo);
 
   const params = new URLSearchParams({
     client_id: clientId,

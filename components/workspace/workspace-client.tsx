@@ -12,8 +12,6 @@ import {
   Cloud,
   DatabaseZap,
   Download,
-  Eye,
-  EyeOff,
   FileText,
   GitBranch,
   Loader2,
@@ -58,6 +56,93 @@ type Stage =
 type StreamEvent = { type: string; data: Record<string, any> };
 const DEMO_RATES = { inputPerThousand: 0.25, outputPerThousand: 1.1 };
 const DEMO_STARTING_BALANCE = 1000;
+const QB_MAX_FILES = 10;
+const QB_MAX_TOTAL_BYTES = 8_000_000;
+
+type QuickBooksPayload = Record<string, any>;
+type QbSummary = {
+  customers: number;
+  vendors: number;
+  items: number;
+  invoices: number;
+  profitAndLoss: boolean;
+  balanceSheet: boolean;
+};
+
+const QB_ERROR_MESSAGES: Record<string, string> = {
+  access_denied: "You cancelled the QuickBooks authorization.",
+  invalid_state: "The QuickBooks sign-in session expired. Please try again.",
+  missing_params:
+    "QuickBooks did not return the expected details. Please try again.",
+  token_exchange:
+    "QuickBooks could not complete the connection. Please try again.",
+};
+
+const qbErrorMessage = (reason: string | null) =>
+  (reason && QB_ERROR_MESSAGES[reason]) ||
+  "Could not connect to QuickBooks. Please try again.";
+
+function qbEntities<T = Record<string, unknown>>(
+  payload: unknown,
+  key: string,
+): T[] {
+  const value = (payload as any)?.QueryResponse?.[key];
+  return Array.isArray(value) ? (value as T[]) : [];
+}
+
+function csvEscape(value: unknown): string {
+  if (value === null || value === undefined) return "";
+  const text =
+    typeof value === "object" ? JSON.stringify(value) : String(value);
+  return /[",\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+}
+
+function toCsv(rows: Record<string, unknown>[]): string {
+  if (!rows.length) return "";
+  const columns = Array.from(
+    rows.reduce((set, row) => {
+      Object.keys(row).forEach((key) => set.add(key));
+      return set;
+    }, new Set<string>()),
+  );
+  const lines = [columns.map(csvEscape).join(",")];
+  for (const row of rows) {
+    lines.push(columns.map((column) => csvEscape(row[column])).join(","));
+  }
+  return lines.join("\n");
+}
+
+function summarizeQuickBooks(data: QuickBooksPayload): QbSummary {
+  return {
+    customers: qbEntities(data.customers, "Customer").length,
+    vendors: qbEntities(data.vendors, "Vendor").length,
+    items: qbEntities(data.items, "Item").length,
+    invoices: qbEntities(data.invoices, "Invoice").length,
+    profitAndLoss: Boolean(data.profitAndLoss),
+    balanceSheet: Boolean(data.balanceSheet),
+  };
+}
+
+function quickBooksToFiles(data: QuickBooksPayload): Upload[] {
+  const files: Upload[] = [];
+  const add = (name: string, rows: Record<string, unknown>[]) => {
+    if (!rows.length) return;
+    const content = toCsv(rows);
+    if (!content) return;
+    files.push({
+      name,
+      content,
+      size: new TextEncoder().encode(content).length,
+    });
+  };
+
+  add("quickbooks-customers.csv", qbEntities(data.customers, "Customer"));
+  add("quickbooks-vendors.csv", qbEntities(data.vendors, "Vendor"));
+  add("quickbooks-items.csv", qbEntities(data.items, "Item"));
+  add("quickbooks-invoices.csv", qbEntities(data.invoices, "Invoice"));
+
+  return files;
+}
 
 const createSessionId = () => {
   const webCrypto = globalThis.crypto;
@@ -176,11 +261,15 @@ export default function WorkspaceClient({
   const [cleanupDone, setCleanupDone] = useState(false);
   const [runProgress, setRunProgress] = useState(0);
   const [qbDialogOpen, setQbDialogOpen] = useState(false);
-  const [qbEmail, setQbEmail] = useState("");
-  const [qbPassword, setQbPassword] = useState("");
-  const [qbShowPassword, setQbShowPassword] = useState(false);
   const [qbConnecting, setQbConnecting] = useState(false);
+  const [qbChecking, setQbChecking] = useState(true);
   const [qbConnected, setQbConnected] = useState(false);
+  const [qbCompanyName, setQbCompanyName] = useState<string | null>(null);
+  const [qbRealmId, setQbRealmId] = useState<string | null>(null);
+  const [qbSummary, setQbSummary] = useState<QbSummary | null>(null);
+  const [qbDataLoading, setQbDataLoading] = useState(false);
+  const [qbDataError, setQbDataError] = useState("");
+  const [qbImported, setQbImported] = useState(false);
   const [qbError, setQbError] = useState("");
   const abortRef = useRef<AbortController | null>(null);
   const traceRef = useRef<HTMLDivElement | null>(null);
@@ -278,6 +367,178 @@ export default function WorkspaceClient({
     size: file.size,
   }));
 
+  const stripQbParams = () => {
+    const url = new URL(window.location.href);
+    url.searchParams.delete("qb");
+    url.searchParams.delete("reason");
+    window.history.replaceState(
+      null,
+      "",
+      `${url.pathname}${url.search}${url.hash}`,
+    );
+  };
+
+  const refreshQbStatus = async (): Promise<boolean> => {
+    try {
+      const response = await fetch("/api/quickbooks/status", {
+        cache: "no-store",
+      });
+      const data = (await response.json()) as {
+        connected?: boolean;
+        companyName?: string | null;
+        realmId?: string | null;
+        error?: string;
+      };
+      const connected = Boolean(data.connected);
+      setQbConnected(connected);
+      setQbCompanyName(data.companyName ?? null);
+      setQbRealmId(data.realmId ?? null);
+      if (!connected && data.error) setQbError(data.error);
+      return connected;
+    } catch {
+      setQbConnected(false);
+      return false;
+    } finally {
+      setQbChecking(false);
+    }
+  };
+
+  const importQuickBooksData = async () => {
+    setQbDataLoading(true);
+    setQbDataError("");
+    try {
+      const response = await fetch("/api/quickbooks/data?type=all", {
+        cache: "no-store",
+      });
+      const payload = (await response.json().catch(() => ({}))) as {
+        data?: QuickBooksPayload;
+        error?: string;
+      };
+      if (!response.ok || !payload.data) {
+        throw new Error(payload.error || "Could not load QuickBooks data.");
+      }
+
+      setQbSummary(summarizeQuickBooks(payload.data));
+      const generated = quickBooksToFiles(payload.data);
+      if (!generated.length) {
+        setQbDataError(
+          "Connected, but there are no QuickBooks records to import yet.",
+        );
+        return;
+      }
+
+      const retained = files.filter(
+        (file) => !file.name.startsWith("quickbooks-"),
+      );
+      const combined = [...retained, ...generated];
+      const totalSize = combined.reduce((sum, file) => sum + file.size, 0);
+      if (combined.length > QB_MAX_FILES || totalSize > QB_MAX_TOTAL_BYTES) {
+        setQbDataError(
+          "QuickBooks data is larger than the task upload limit (10 files / 8 MB). Remove some files and retry.",
+        );
+        return;
+      }
+
+      setFiles(combined);
+      setQbImported(true);
+    } catch (reason) {
+      setQbDataError(
+        reason instanceof Error
+          ? reason.message
+          : "Could not load QuickBooks data.",
+      );
+    } finally {
+      setQbDataLoading(false);
+    }
+  };
+
+  const connectQuickBooks = async () => {
+    setQbError("");
+    setQbDataError("");
+    setQbConnecting(true);
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.delete("qb");
+      url.searchParams.delete("reason");
+      const returnTo = `${url.pathname}${url.search}`;
+      const response = await fetch(
+        `/api/quickbooks/auth?returnTo=${encodeURIComponent(returnTo)}`,
+        { cache: "no-store" },
+      );
+      const data = (await response.json()) as {
+        authUrl?: string;
+        error?: string;
+      };
+      if (!response.ok || !data.authUrl) {
+        throw new Error(
+          data.error || "QuickBooks is not configured on this server.",
+        );
+      }
+      // Full-page redirect to Intuit's own login. No credentials are
+      // collected or stored by this application.
+      window.location.assign(data.authUrl);
+    } catch (reason) {
+      setQbConnecting(false);
+      setQbError(
+        reason instanceof Error
+          ? reason.message
+          : "Could not start the QuickBooks connection.",
+      );
+    }
+  };
+
+  const disconnectQuickBooks = async () => {
+    setQbDataLoading(true);
+    setQbDataError("");
+    try {
+      const response = await fetch("/api/quickbooks/status", {
+        method: "DELETE",
+      });
+      if (!response.ok) throw new Error("Disconnect failed");
+      setQbConnected(false);
+      setQbCompanyName(null);
+      setQbRealmId(null);
+      setQbSummary(null);
+      setQbImported(false);
+      setFiles((current) =>
+        current.filter((file) => !file.name.startsWith("quickbooks-")),
+      );
+      setQbDialogOpen(false);
+    } catch {
+      setQbDataError("Could not disconnect QuickBooks. Please try again.");
+    } finally {
+      setQbDataLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+    const params = new URLSearchParams(window.location.search);
+    const qb = params.get("qb");
+    const reason = params.get("reason");
+
+    if (qb === "error") {
+      setQbError(qbErrorMessage(reason));
+    }
+
+    const initialise = async () => {
+      const connected = await refreshQbStatus();
+      if (cancelled) return;
+      if (connected && qb === "connected") {
+        setQbDialogOpen(true);
+        await importQuickBooksData();
+      }
+      if (qb) stripQbParams();
+    };
+
+    void initialise();
+    return () => {
+      cancelled = true;
+    };
+    // Runs once on mount: the query string is the OAuth callback signal.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   useEffect(() => {
     fetch("/api/execute", { cache: "no-store" })
       .then((response) => response.json())
@@ -361,6 +622,7 @@ export default function WorkspaceClient({
     setUsage(null);
     setError("");
     setCleanupDone(false);
+    setQbImported(false);
     setRunProgress(0);
     setActiveSessionId(createSessionId());
   };
@@ -1001,36 +1263,119 @@ export default function WorkspaceClient({
                     <button
                       type="button"
                       onClick={() => {
-                        if (!qbConnected) {
-                          setQbError("");
-                          setQbEmail("");
-                          setQbPassword("");
-                          setQbShowPassword(false);
-                          setQbConnecting(false);
+                        if (qbConnected) {
                           setQbDialogOpen(true);
+                        } else {
+                          void connectQuickBooks();
                         }
                       }}
-                      className={`mt-3 flex w-full items-center justify-center gap-2.5 rounded-xl border px-4 py-3 text-xs font-semibold transition-all duration-200 ${
+                      disabled={qbConnecting || qbChecking}
+                      className={`mt-3 flex w-full items-center justify-center gap-2.5 rounded-xl border px-4 py-3 text-xs font-semibold transition-all duration-200 disabled:cursor-wait disabled:opacity-70 ${
                         qbConnected
-                          ? "border-emerald-200 bg-emerald-50 text-emerald-700 cursor-default"
+                          ? "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
                           : "border-ink/15 bg-white text-ink hover:border-[#2CA01C]/40 hover:bg-[#2CA01C]/[0.04] hover:shadow-sm"
                       }`}
                     >
                       {/* QuickBooks Logo SVG */}
-                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                      <svg
+                        width="20"
+                        height="20"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        xmlns="http://www.w3.org/2000/svg"
+                      >
                         <circle cx="12" cy="12" r="11" fill="#2CA01C" />
-                        <path d="M7.5 7.5C6.12 7.5 5 8.62 5 10v4c0 1.38 1.12 2.5 2.5 2.5H9v-1.5H7.5c-.55 0-1-.45-1-1v-4c0-.55.45-1 1-1H9V14.5c0 1.38 1.12 2.5 2.5 2.5V7.5H7.5z" fill="white" />
-                        <path d="M16.5 16.5c1.38 0 2.5-1.12 2.5-2.5v-4c0-1.38-1.12-2.5-2.5-2.5H15v1.5h1.5c.55 0 1 .45 1 1v4c0 .55-.45 1-1 1H15V9.5c0-1.38-1.12-2.5-2.5-2.5v9.5h4z" fill="white" />
+                        <path
+                          d="M7.5 7.5C6.12 7.5 5 8.62 5 10v4c0 1.38 1.12 2.5 2.5 2.5H9v-1.5H7.5c-.55 0-1-.45-1-1v-4c0-.55.45-1 1-1H9V14.5c0 1.38 1.12 2.5 2.5 2.5V7.5H7.5z"
+                          fill="white"
+                        />
+                        <path
+                          d="M16.5 16.5c1.38 0 2.5-1.12 2.5-2.5v-4c0-1.38-1.12-2.5-2.5-2.5H15v1.5h1.5c.55 0 1 .45 1 1v4c0 .55-.45 1-1 1H15V9.5c0-1.38-1.12-2.5-2.5-2.5v9.5h4z"
+                          fill="white"
+                        />
                       </svg>
-                      {qbConnected ? (
+                      {qbConnecting ? (
                         <>
-                          Connected to QuickBooks
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                          Redirecting to Intuit…
+                        </>
+                      ) : qbConnected ? (
+                        <>
+                          {qbCompanyName
+                            ? `Connected · ${qbCompanyName}`
+                            : "Connected to QuickBooks"}
                           <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                        </>
+                      ) : qbChecking ? (
+                        <>
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                          Checking QuickBooks…
                         </>
                       ) : (
                         "Connect with QuickBooks"
                       )}
                     </button>
+                    {qbError && !qbDialogOpen && (
+                      <p className="mt-2 text-[10.5px] leading-relaxed text-red-600">
+                        {qbError}
+                      </p>
+                    )}
+                    {qbConnected && (
+                      <div className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50/70 p-3">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <p className="text-[10.5px] font-semibold text-emerald-800">
+                            {qbCompanyName || "QuickBooks company"}
+                            {qbRealmId ? ` · ${qbRealmId}` : ""}
+                          </p>
+                          <button
+                            type="button"
+                            onClick={() => setQbDialogOpen(true)}
+                            className="text-[10px] font-medium text-emerald-700 underline underline-offset-2 hover:text-emerald-900"
+                          >
+                            Manage
+                          </button>
+                        </div>
+                        <p className="mt-1 text-[10px] leading-relaxed text-emerald-700/80">
+                          {qbDataLoading
+                            ? "Reading your QuickBooks data…"
+                            : qbImported
+                              ? "QuickBooks records are part of this task."
+                              : "Import customers, vendors, items, invoices and reports into this task."}
+                        </p>
+                        {qbSummary && (
+                          <p className="mt-1.5 font-mono text-[9.5px] leading-relaxed text-emerald-800/80">
+                            {qbSummary.customers} customers ·{" "}
+                            {qbSummary.vendors} vendors · {qbSummary.items}{" "}
+                            items · {qbSummary.invoices} invoices
+                          </p>
+                        )}
+                        {qbDataError && (
+                          <p className="mt-1.5 text-[10px] leading-relaxed text-red-600">
+                            {qbDataError}
+                          </p>
+                        )}
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            onClick={() => void importQuickBooksData()}
+                            disabled={qbDataLoading}
+                            className="rounded-lg bg-[#2CA01C] px-2.5 py-1.5 text-[10px] font-semibold text-white transition hover:bg-[#248B17] disabled:opacity-60"
+                          >
+                            {qbImported
+                              ? "Refresh imported data"
+                              : "Import data"}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => void disconnectQuickBooks()}
+                            disabled={qbDataLoading}
+                            className="rounded-lg border border-emerald-300 bg-white px-2.5 py-1.5 text-[10px] font-semibold text-emerald-800 transition hover:bg-emerald-50 disabled:opacity-60"
+                          >
+                            Disconnect
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                   <div className="bai-card p-5">
                     <p className="label">Task prompt</p>
@@ -1633,10 +1978,22 @@ export default function WorkspaceClient({
           {/* Green Header */}
           <div className="bg-gradient-to-br from-[#2CA01C] to-[#1F7A14] px-6 pt-7 pb-5 text-center text-white">
             <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-white/20 backdrop-blur-sm">
-              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <svg
+                width="28"
+                height="28"
+                viewBox="0 0 24 24"
+                fill="none"
+                xmlns="http://www.w3.org/2000/svg"
+              >
                 <circle cx="12" cy="12" r="11" fill="white" fillOpacity="0.2" />
-                <path d="M7.5 7.5C6.12 7.5 5 8.62 5 10v4c0 1.38 1.12 2.5 2.5 2.5H9v-1.5H7.5c-.55 0-1-.45-1-1v-4c0-.55.45-1 1-1H9V14.5c0 1.38 1.12 2.5 2.5 2.5V7.5H7.5z" fill="white" />
-                <path d="M16.5 16.5c1.38 0 2.5-1.12 2.5-2.5v-4c0-1.38-1.12-2.5-2.5-2.5H15v1.5h1.5c.55 0 1 .45 1 1v4c0 .55-.45 1-1 1H15V9.5c0-1.38-1.12-2.5-2.5-2.5v9.5h4z" fill="white" />
+                <path
+                  d="M7.5 7.5C6.12 7.5 5 8.62 5 10v4c0 1.38 1.12 2.5 2.5 2.5H9v-1.5H7.5c-.55 0-1-.45-1-1v-4c0-.55.45-1 1-1H9V14.5c0 1.38 1.12 2.5 2.5 2.5V7.5H7.5z"
+                  fill="white"
+                />
+                <path
+                  d="M16.5 16.5c1.38 0 2.5-1.12 2.5-2.5v-4c0-1.38-1.12-2.5-2.5-2.5H15v1.5h1.5c.55 0 1 .45 1 1v4c0 .55-.45 1-1 1H15V9.5c0-1.38-1.12-2.5-2.5-2.5v9.5h4z"
+                  fill="white"
+                />
               </svg>
             </div>
             <DialogHeader>
@@ -1645,124 +2002,180 @@ export default function WorkspaceClient({
               </DialogTitle>
               <DialogDescription className="mt-1 text-white/80 text-xs">
                 {qbConnected
-                  ? "Your QuickBooks account has been linked successfully."
-                  : "Sign in with your Intuit account to import data directly."}
+                  ? "Your Intuit account is linked to this workspace."
+                  : "You'll be redirected to Intuit to sign in and grant access."}
               </DialogDescription>
             </DialogHeader>
           </div>
 
           <div className="px-6 pb-6 pt-4">
             {qbConnected ? (
-              /* ---- Success State ---- */
-              <div className="flex flex-col items-center gap-3 py-4">
-                <div className="flex h-14 w-14 items-center justify-center rounded-full bg-emerald-100">
-                  <CheckCircle2 className="h-7 w-7 text-emerald-600" />
+              <div className="space-y-4">
+                <div className="flex items-center gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-3.5 py-3">
+                  <div className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-emerald-100">
+                    <CheckCircle2 className="h-5 w-5 text-emerald-600" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="truncate text-xs font-semibold text-emerald-800">
+                      {qbCompanyName || "QuickBooks company"}
+                    </p>
+                    <p className="mt-0.5 truncate font-mono text-[9.5px] text-emerald-700/80">
+                      Realm {qbRealmId || "unknown"}
+                    </p>
+                  </div>
                 </div>
-                <p className="text-sm font-medium text-emerald-700">
-                  QuickBooks is connected
-                </p>
-                <p className="max-w-xs text-center text-[11px] leading-relaxed text-muted-foreground">
-                  Your financial data can now be imported directly into the agent task. You can disconnect anytime from your account settings.
-                </p>
-                <Button
-                  type="button"
-                  className="mt-2"
-                  onClick={() => setQbDialogOpen(false)}
-                >
-                  <Check className="h-3.5 w-3.5" />
-                  Done
-                </Button>
+
+                <div className="rounded-xl border border-ink/8 bg-paper/60 p-3.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-[11px] font-semibold">QuickBooks data</p>
+                    <span className="font-mono text-[9px] uppercase tracking-wide text-muted-foreground">
+                      {qbDataLoading
+                        ? "Loading"
+                        : qbSummary
+                          ? "Ready"
+                          : "Not loaded"}
+                    </span>
+                  </div>
+                  {qbSummary ? (
+                    <dl className="mt-2 grid grid-cols-2 gap-1.5 text-[10.5px]">
+                      <div className="flex justify-between rounded-lg bg-white px-2 py-1.5">
+                        <dt className="text-muted-foreground">Customers</dt>
+                        <dd className="font-semibold">{qbSummary.customers}</dd>
+                      </div>
+                      <div className="flex justify-between rounded-lg bg-white px-2 py-1.5">
+                        <dt className="text-muted-foreground">Vendors</dt>
+                        <dd className="font-semibold">{qbSummary.vendors}</dd>
+                      </div>
+                      <div className="flex justify-between rounded-lg bg-white px-2 py-1.5">
+                        <dt className="text-muted-foreground">Items</dt>
+                        <dd className="font-semibold">{qbSummary.items}</dd>
+                      </div>
+                      <div className="flex justify-between rounded-lg bg-white px-2 py-1.5">
+                        <dt className="text-muted-foreground">Invoices</dt>
+                        <dd className="font-semibold">{qbSummary.invoices}</dd>
+                      </div>
+                      <div className="col-span-2 flex justify-between rounded-lg bg-white px-2 py-1.5">
+                        <dt className="text-muted-foreground">
+                          Financial reports
+                        </dt>
+                        <dd className="font-semibold">
+                          {(qbSummary.profitAndLoss ? 1 : 0) +
+                            (qbSummary.balanceSheet ? 1 : 0)}
+                          /2
+                        </dd>
+                      </div>
+                    </dl>
+                  ) : (
+                    <p className="mt-2 text-[10.5px] leading-relaxed text-muted-foreground">
+                      Load customers, vendors, items, invoices and financial
+                      reports to use them in this task.
+                    </p>
+                  )}
+                  {qbDataError && (
+                    <p className="mt-2 text-[10.5px] leading-relaxed text-red-600">
+                      {qbDataError}
+                    </p>
+                  )}
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => void importQuickBooksData()}
+                      disabled={qbDataLoading}
+                      className="rounded-lg bg-[#2CA01C] px-2.5 py-1.5 text-[10px] font-semibold text-white transition hover:bg-[#248B17] disabled:opacity-60"
+                    >
+                      {qbDataLoading
+                        ? "Loading…"
+                        : qbImported
+                          ? "Refresh imported data"
+                          : "Import data into task"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void disconnectQuickBooks()}
+                      disabled={qbDataLoading}
+                      className="rounded-lg border border-ink/15 bg-white px-2.5 py-1.5 text-[10px] font-semibold text-ink/70 transition hover:bg-paper disabled:opacity-60"
+                    >
+                      Disconnect
+                    </button>
+                  </div>
+                </div>
+
+                <div className="flex justify-end">
+                  <Button type="button" onClick={() => setQbDialogOpen(false)}>
+                    <Check className="h-3.5 w-3.5" />
+                    Done
+                  </Button>
+                </div>
               </div>
             ) : qbConnecting ? (
-              /* ---- Connecting State ---- */
               <div className="flex flex-col items-center gap-3 py-8">
                 <Loader2 className="h-8 w-8 animate-spin text-[#2CA01C]" />
-                <p className="text-sm font-medium">Connecting to QuickBooks…</p>
-                <p className="text-[11px] text-muted-foreground">Authorizing your account securely.</p>
+                <p className="text-sm font-medium">Redirecting to Intuit…</p>
+                <p className="text-center text-[11px] text-muted-foreground">
+                  Sign in on Intuit&apos;s secure page to authorize this app.
+                </p>
               </div>
             ) : (
-              /* ---- Login Form ---- */
-              <form
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  if (!qbEmail.trim() || !qbPassword.trim()) {
-                    setQbError("Please enter both email and password.");
-                    return;
-                  }
-                  setQbError("");
-                  setQbConnecting(true);
-                  // Simulate OAuth connection delay
-                  setTimeout(() => {
-                    setQbConnecting(false);
-                    setQbConnected(true);
-                  }, 2200);
-                }}
-                className="space-y-4"
-              >
+              <div className="space-y-4">
                 {qbError && (
                   <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[11px] text-red-600">
                     {qbError}
                   </div>
                 )}
-                <div>
-                  <label className="mb-1.5 block text-[11px] font-semibold text-ink/70">
-                    Email or User ID
-                  </label>
-                  <input
-                    type="text"
-                    value={qbEmail}
-                    onChange={(e) => setQbEmail(e.target.value)}
-                    placeholder="you@company.com"
-                    className="w-full rounded-xl border border-ink/12 bg-white px-3.5 py-2.5 text-[12px] outline-none transition placeholder:text-ink/30 focus:border-[#2CA01C]/50 focus:ring-2 focus:ring-[#2CA01C]/10"
-                    autoFocus
-                  />
-                </div>
-                <div>
-                  <label className="mb-1.5 block text-[11px] font-semibold text-ink/70">
-                    Password
-                  </label>
-                  <div className="relative">
-                    <input
-                      type={qbShowPassword ? "text" : "password"}
-                      value={qbPassword}
-                      onChange={(e) => setQbPassword(e.target.value)}
-                      placeholder="Enter your password"
-                      className="w-full rounded-xl border border-ink/12 bg-white px-3.5 py-2.5 pr-10 text-[12px] outline-none transition placeholder:text-ink/30 focus:border-[#2CA01C]/50 focus:ring-2 focus:ring-[#2CA01C]/10"
-                    />
-                    <button
-                      type="button"
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-ink transition-colors"
-                      onClick={() => setQbShowPassword((v) => !v)}
-                      tabIndex={-1}
-                    >
-                      {qbShowPassword ? (
-                        <EyeOff className="h-4 w-4" />
-                      ) : (
-                        <Eye className="h-4 w-4" />
-                      )}
-                    </button>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <LockKeyhole className="h-3 w-3 text-muted-foreground" />
-                  <span className="text-[10px] text-muted-foreground">
-                    Secured by Intuit. Your credentials are never stored.
+                <ol className="space-y-2.5">
+                  {[
+                    "You are redirected to Intuit's own sign-in page.",
+                    "Sign in and choose the QuickBooks company to connect.",
+                    "Grant the accounting access requested by this app.",
+                    "Intuit returns you here with secure OAuth tokens.",
+                  ].map((step, index) => (
+                    <li key={step} className="flex items-start gap-2.5">
+                      <span className="grid h-5 w-5 shrink-0 place-items-center rounded-full bg-[#2CA01C]/10 text-[10px] font-semibold text-[#1F7A14]">
+                        {index + 1}
+                      </span>
+                      <span className="text-[11px] leading-relaxed text-muted-foreground">
+                        {step}
+                      </span>
+                    </li>
+                  ))}
+                </ol>
+                <div className="flex items-start gap-2 rounded-lg border border-ink/8 px-3 py-2.5">
+                  <LockKeyhole className="mt-0.5 h-3 w-3 shrink-0 text-muted-foreground" />
+                  <span className="text-[10px] leading-relaxed text-muted-foreground">
+                    Your QuickBooks email and password are entered only on
+                    Intuit&apos;s site. This app never sees or stores them.
                   </span>
                 </div>
                 <button
-                  type="submit"
-                  className="w-full rounded-xl bg-[#2CA01C] px-4 py-2.5 text-[13px] font-semibold text-white shadow-sm transition-all hover:bg-[#248B17] hover:shadow-md active:scale-[0.98] disabled:opacity-60"
+                  type="button"
+                  onClick={() => void connectQuickBooks()}
                   disabled={qbConnecting}
+                  className="w-full rounded-xl bg-[#2CA01C] px-4 py-2.5 text-[13px] font-semibold text-white shadow-sm transition-all hover:bg-[#248B17] hover:shadow-md active:scale-[0.98] disabled:opacity-60"
                 >
-                  Sign In & Connect
+                  Continue to Intuit
                 </button>
                 <p className="text-center text-[10px] text-muted-foreground">
                   By connecting you agree to Intuit&apos;s{" "}
-                  <a href="#" className="underline hover:text-ink">Terms of Service</a>{" "}
+                  <a
+                    href="https://www.intuit.com/legal/terms/"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="underline hover:text-ink"
+                  >
+                    Terms of Service
+                  </a>{" "}
                   and{" "}
-                  <a href="#" className="underline hover:text-ink">Privacy Policy</a>.
+                  <a
+                    href="https://www.intuit.com/privacy/"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="underline hover:text-ink"
+                  >
+                    Privacy Policy
+                  </a>
+                  .
                 </p>
-              </form>
+              </div>
             )}
           </div>
         </DialogContent>

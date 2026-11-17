@@ -25,10 +25,7 @@ export async function GET() {
     // Try to fetch company info to verify the connection is alive
     const { data } = await qbApiRequest<{
       CompanyInfo: { CompanyName: string };
-    }>(
-      "companyinfo/" + tokens.realm_id,
-      tokens,
-    );
+    }>("companyinfo/" + tokens.realm_id, tokens);
 
     return Response.json({
       connected: true,
@@ -36,12 +33,14 @@ export async function GET() {
       realmId: tokens.realm_id,
     });
   } catch {
-    // Tokens exist but API call failed — connection may be stale
+    // Tokens exist but API call failed — the connection needs to be renewed.
     return Response.json({
-      connected: true,
+      connected: false,
+      stale: true,
       companyName: null,
       realmId: tokens.realm_id,
-      warning: "Could not verify connection. Token may need refresh.",
+      error:
+        "The QuickBooks connection could not be verified. Please reconnect your account.",
     });
   }
 }
