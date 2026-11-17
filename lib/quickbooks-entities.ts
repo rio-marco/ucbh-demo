@@ -1,0 +1,187 @@
+export type QuickBooksRecordDefinition = {
+  entity: string;
+  key: string;
+  label: string;
+  file: string;
+  canUpdate: boolean;
+};
+
+export type QuickBooksReportDefinition = {
+  key: string;
+  label: string;
+  endpoint: string;
+  file: string;
+};
+
+export const QB_RECORD_DEFINITIONS: QuickBooksRecordDefinition[] = [
+  { entity: "Customer", key: "customers", label: "Customers", file: "quickbooks-customers.csv", canUpdate: true },
+  { entity: "Vendor", key: "vendors", label: "Vendors", file: "quickbooks-vendors.csv", canUpdate: true },
+  { entity: "Employee", key: "employees", label: "Employees", file: "quickbooks-employees.csv", canUpdate: true },
+  { entity: "Item", key: "items", label: "Items", file: "quickbooks-items.csv", canUpdate: true },
+  { entity: "Invoice", key: "invoices", label: "Invoices", file: "quickbooks-invoices.csv", canUpdate: true },
+  { entity: "Estimate", key: "estimates", label: "Estimates", file: "quickbooks-estimates.csv", canUpdate: true },
+  { entity: "SalesReceipt", key: "salesReceipts", label: "Sales receipts", file: "quickbooks-sales-receipts.csv", canUpdate: true },
+  { entity: "CreditMemo", key: "creditMemos", label: "Credit memos", file: "quickbooks-credit-memos.csv", canUpdate: true },
+  { entity: "RefundReceipt", key: "refundReceipts", label: "Refund receipts", file: "quickbooks-refund-receipts.csv", canUpdate: true },
+  { entity: "Payment", key: "payments", label: "Payments", file: "quickbooks-payments.csv", canUpdate: true },
+  { entity: "Bill", key: "bills", label: "Bills", file: "quickbooks-bills.csv", canUpdate: true },
+  { entity: "BillPayment", key: "billPayments", label: "Bill payments", file: "quickbooks-bill-payments.csv", canUpdate: true },
+  { entity: "VendorCredit", key: "vendorCredits", label: "Vendor credits", file: "quickbooks-vendor-credits.csv", canUpdate: true },
+  { entity: "Purchase", key: "purchases", label: "Purchases", file: "quickbooks-purchases.csv", canUpdate: true },
+  { entity: "PurchaseOrder", key: "purchaseOrders", label: "Purchase orders", file: "quickbooks-purchase-orders.csv", canUpdate: true },
+  { entity: "JournalEntry", key: "journalEntries", label: "Journal entries", file: "quickbooks-journal-entries.csv", canUpdate: true },
+  { entity: "Transfer", key: "transfers", label: "Transfers", file: "quickbooks-transfers.csv", canUpdate: true },
+  { entity: "Deposit", key: "deposits", label: "Deposits", file: "quickbooks-deposits.csv", canUpdate: true },
+  { entity: "TimeActivity", key: "timeActivities", label: "Time activities", file: "quickbooks-time-activities.csv", canUpdate: true },
+  { entity: "Account", key: "accounts", label: "Accounts", file: "quickbooks-accounts.csv", canUpdate: true },
+  { entity: "Class", key: "classes", label: "Classes", file: "quickbooks-classes.csv", canUpdate: true },
+  { entity: "Department", key: "departments", label: "Departments", file: "quickbooks-departments.csv", canUpdate: true },
+  { entity: "Term", key: "terms", label: "Terms", file: "quickbooks-terms.csv", canUpdate: true },
+  { entity: "PaymentMethod", key: "paymentMethods", label: "Payment methods", file: "quickbooks-payment-methods.csv", canUpdate: true },
+  { entity: "TaxCode", key: "taxCodes", label: "Tax codes", file: "quickbooks-tax-codes.csv", canUpdate: true },
+  { entity: "TaxRate", key: "taxRates", label: "Tax rates", file: "quickbooks-tax-rates.csv", canUpdate: true },
+  { entity: "TaxAgency", key: "taxAgencies", label: "Tax agencies", file: "quickbooks-tax-agencies.csv", canUpdate: true },
+];
+
+export const QB_REPORT_DEFINITIONS: QuickBooksReportDefinition[] = [
+  {
+    key: "profitAndLoss",
+    label: "Profit and Loss",
+    endpoint: "reports/ProfitAndLoss?date_macro=This Fiscal Year-to-date",
+    file: "quickbooks-profit-and-loss.json",
+  },
+  {
+    key: "balanceSheet",
+    label: "Balance Sheet",
+    endpoint: "reports/BalanceSheet?date_macro=This Fiscal Year-to-date",
+    file: "quickbooks-balance-sheet.json",
+  },
+  {
+    key: "cashFlow",
+    label: "Cash Flow",
+    endpoint: "reports/CashFlow?date_macro=This Fiscal Year-to-date",
+    file: "quickbooks-cash-flow.json",
+  },
+  {
+    key: "trialBalance",
+    label: "Trial Balance",
+    endpoint: "reports/TrialBalance?date_macro=This Fiscal Year-to-date",
+    file: "quickbooks-trial-balance.json",
+  },
+];
+
+export const QB_UPDATABLE_ENTITIES = new Set(
+  QB_RECORD_DEFINITIONS.filter((definition) => definition.canUpdate).map(
+    (definition) => definition.entity,
+  ),
+);
+
+const QB_ENTITY_ALIASES = new Map<string, string>();
+for (const definition of QB_RECORD_DEFINITIONS) {
+  QB_ENTITY_ALIASES.set(definition.entity.toLowerCase(), definition.entity);
+  QB_ENTITY_ALIASES.set(definition.key.toLowerCase(), definition.entity);
+}
+
+export const QUICKBOOKS_UPDATES_FILE = "quickbooks-updates.json";
+export const QUICKBOOKS_MAX_OPERATIONS = 25;
+
+const PROTECTED_UPDATE_FIELDS = new Set([
+  "Id",
+  "SyncToken",
+  "sparse",
+  "domain",
+  "MetaData",
+  "status",
+  "CreatedTime",
+  "LastUpdatedTime",
+]);
+
+export type QuickBooksUpdateOperation = {
+  entity: string;
+  id: string;
+  syncToken: string;
+  fields: Record<string, unknown>;
+};
+
+const asText = (value: unknown): string =>
+  typeof value === "string" || typeof value === "number"
+    ? String(value).trim()
+    : "";
+
+/** Validate an AI-proposed quickbooks-updates.json payload. */
+export function parseQuickBooksUpdates(input: unknown): {
+  operations?: QuickBooksUpdateOperation[];
+  error?: string;
+} {
+  const raw = Array.isArray(input)
+    ? input
+    : input &&
+        typeof input === "object" &&
+        Array.isArray((input as { operations?: unknown }).operations)
+      ? (input as { operations: unknown[] }).operations
+      : null;
+
+  if (!raw) {
+    return { error: "Provide an operations array." };
+  }
+  if (raw.length < 1 || raw.length > QUICKBOOKS_MAX_OPERATIONS) {
+    return {
+      error: `Provide between 1 and ${QUICKBOOKS_MAX_OPERATIONS} update operations.`,
+    };
+  }
+
+  const operations: QuickBooksUpdateOperation[] = [];
+
+  for (let index = 0; index < raw.length; index += 1) {
+    const item = raw[index];
+    if (!item || typeof item !== "object" || Array.isArray(item)) {
+      return { error: `Operation ${index + 1} must be an object.` };
+    }
+    const operation = item as Record<string, unknown>;
+    const requestedEntity = asText(operation.entity);
+    const entity =
+      QB_ENTITY_ALIASES.get(requestedEntity.toLowerCase()) ?? "";
+    const id = asText(operation.id ?? operation.Id);
+    const syncToken = asText(operation.syncToken ?? operation.SyncToken);
+    const fieldsInput = operation.fields ?? operation.data;
+
+    if (!entity || !QB_UPDATABLE_ENTITIES.has(entity)) {
+      return {
+        error: `Operation ${index + 1} has an unsupported entity: ${requestedEntity || "(missing)"}.`,
+      };
+    }
+    if (!id) {
+      return { error: `Operation ${index + 1} is missing a QuickBooks Id.` };
+    }
+    if (!syncToken) {
+      return {
+        error: `Operation ${index + 1} is missing a SyncToken. Re-import fresh QuickBooks data and run the task again.`,
+      };
+    }
+    if (
+      !fieldsInput ||
+      typeof fieldsInput !== "object" ||
+      Array.isArray(fieldsInput)
+    ) {
+      return {
+        error: `Operation ${index + 1} must include a fields object.`,
+      };
+    }
+
+    const fields = Object.fromEntries(
+      Object.entries(fieldsInput as Record<string, unknown>).filter(
+        ([key]) => !PROTECTED_UPDATE_FIELDS.has(key),
+      ),
+    );
+
+    if (!Object.keys(fields).length) {
+      return {
+        error: `Operation ${index + 1} does not contain any updateable fields.`,
+      };
+    }
+
+    operations.push({ entity, id, syncToken, fields });
+  }
+
+  return { operations };
+}

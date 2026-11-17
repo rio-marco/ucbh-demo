@@ -333,3 +333,82 @@ export async function qbApiRequest<T = Record<string, unknown>>(
   const data = (await response.json()) as T;
   return { data, tokens: currentTokens };
 }
+
+function quickBooksErrorMessage(status: number, body: string): string {
+  try {
+    const parsed = JSON.parse(body) as {
+      Fault?: {
+        Error?: { Message?: string; Detail?: string }[];
+      };
+    };
+    const errors = parsed.Fault?.Error;
+    if (Array.isArray(errors) && errors.length) {
+      return errors
+        .map((item) => [item.Message, item.Detail].filter(Boolean).join(": "))
+        .filter(Boolean)
+        .join("; ");
+    }
+  } catch {
+    // Fall through to the raw response text.
+  }
+  const text = body.replace(/\s+/g, " ").trim();
+  return text
+    ? text.slice(0, 500)
+    : `QuickBooks request failed with status ${status}.`;
+}
+
+/**
+ * Update an existing QuickBooks record. The payload must include `Id` and
+ * `SyncToken`; `sparse: true` lets Intuit update only the supplied fields.
+ * Automatically refreshes the token if expired.
+ */
+export async function qbApiUpdate<T = Record<string, unknown>>(
+  entity: string,
+  tokens: QBTokens,
+  payload: Record<string, unknown>,
+): Promise<{ data: T; tokens: QBTokens }> {
+  let currentTokens = tokens;
+
+  if (isTokenExpired(currentTokens)) {
+    currentTokens = await refreshAccessToken(currentTokens.refresh_token);
+  }
+
+  const { environment } = getQBConfig();
+  const baseUrl = QB_API_BASE[environment] || QB_API_BASE.sandbox;
+  const url = `${baseUrl}/v3/company/${currentTokens.realm_id}/${encodeURIComponent(
+    entity,
+  )}?operation=update`;
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${currentTokens.access_token}`,
+    },
+    body: JSON.stringify(payload),
+  });
+
+  const body = await response.text();
+  if (!response.ok) {
+    console.error(`QuickBooks update error (${entity}):`, body);
+    throw new Error(quickBooksErrorMessage(response.status, body));
+  }
+
+  let data: T;
+  try {
+    data = JSON.parse(body) as T;
+  } catch {
+    throw new Error("QuickBooks returned an invalid response.");
+  }
+
+  if (
+    data &&
+    typeof data === "object" &&
+    "Fault" in (data as Record<string, unknown>)
+  ) {
+    throw new Error(quickBooksErrorMessage(response.status, body));
+  }
+
+  return { data, tokens: currentTokens };
+}

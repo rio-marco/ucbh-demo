@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
+  AlertTriangle,
   ArrowLeft,
   ArrowRight,
   Box,
@@ -18,6 +19,7 @@ import {
   LockKeyhole,
   Play,
   RotateCcw,
+  Send,
   ShieldCheck,
   Sparkles,
   Square,
@@ -43,6 +45,13 @@ import type {
   SessionRecord,
   SessionStatus,
 } from "@/lib/types";
+import {
+  parseQuickBooksUpdates,
+  QB_RECORD_DEFINITIONS,
+  QB_REPORT_DEFINITIONS,
+  QUICKBOOKS_UPDATES_FILE,
+  type QuickBooksUpdateOperation,
+} from "@/lib/quickbooks-entities";
 
 type Upload = { name: string; content: string; size: number };
 type OutputFile = { name: string; content: string };
@@ -56,17 +65,18 @@ type Stage =
 type StreamEvent = { type: string; data: Record<string, any> };
 const DEMO_RATES = { inputPerThousand: 0.25, outputPerThousand: 1.1 };
 const DEMO_STARTING_BALANCE = 1000;
-const QB_MAX_FILES = 10;
-const QB_MAX_TOTAL_BYTES = 8_000_000;
+const MAX_TASK_FILES = 40;
+const MAX_TASK_FILE_BYTES = 2_000_000;
+const MAX_TASK_TOTAL_BYTES = 20_000_000;
+const QB_MAX_FILES = MAX_TASK_FILES;
+const QB_MAX_TOTAL_BYTES = MAX_TASK_TOTAL_BYTES;
 
 type QuickBooksPayload = Record<string, any>;
 type QbSummary = {
-  customers: number;
-  vendors: number;
-  items: number;
-  invoices: number;
-  profitAndLoss: boolean;
-  balanceSheet: boolean;
+  records: number;
+  files: number;
+  entities: { label: string; count: number; file: string }[];
+  reports: { label: string; file: string }[];
 };
 
 const QB_ERROR_MESSAGES: Record<string, string> = {
@@ -113,33 +123,68 @@ function toCsv(rows: Record<string, unknown>[]): string {
 }
 
 function summarizeQuickBooks(data: QuickBooksPayload): QbSummary {
+  const entities = QB_RECORD_DEFINITIONS.map((definition) => ({
+    label: definition.label,
+    count: qbEntities(data[definition.key], definition.entity).length,
+    file: definition.file,
+  })).filter((item) => item.count > 0);
+
+  const reports = QB_REPORT_DEFINITIONS.filter((definition) =>
+    Boolean(data[definition.key]),
+  ).map((definition) => ({
+    label: definition.label,
+    file: definition.file,
+  }));
+
+  const files =
+    entities.length +
+    reports.length +
+    (data.companyInfo?.CompanyInfo ? 1 : 0);
+
   return {
-    customers: qbEntities(data.customers, "Customer").length,
-    vendors: qbEntities(data.vendors, "Vendor").length,
-    items: qbEntities(data.items, "Item").length,
-    invoices: qbEntities(data.invoices, "Invoice").length,
-    profitAndLoss: Boolean(data.profitAndLoss),
-    balanceSheet: Boolean(data.balanceSheet),
+    records: entities.reduce((sum, item) => sum + item.count, 0),
+    files,
+    entities,
+    reports,
   };
 }
 
 function quickBooksToFiles(data: QuickBooksPayload): Upload[] {
   const files: Upload[] = [];
-  const add = (name: string, rows: Record<string, unknown>[]) => {
+  const encodeSize = (content: string) =>
+    new TextEncoder().encode(content).length;
+
+  const addCsv = (name: string, rows: Record<string, unknown>[]) => {
     if (!rows.length) return;
     const content = toCsv(rows);
     if (!content) return;
-    files.push({
-      name,
-      content,
-      size: new TextEncoder().encode(content).length,
-    });
+    files.push({ name, content, size: encodeSize(content) });
   };
 
-  add("quickbooks-customers.csv", qbEntities(data.customers, "Customer"));
-  add("quickbooks-vendors.csv", qbEntities(data.vendors, "Vendor"));
-  add("quickbooks-items.csv", qbEntities(data.items, "Item"));
-  add("quickbooks-invoices.csv", qbEntities(data.invoices, "Invoice"));
+  const addJson = (name: string, value: unknown) => {
+    if (!value) return;
+    const content = JSON.stringify(value, null, 2);
+    if (!content) return;
+    files.push({ name, content, size: encodeSize(content) });
+  };
+
+  for (const definition of QB_RECORD_DEFINITIONS) {
+    addCsv(
+      definition.file,
+      qbEntities(data[definition.key], definition.entity),
+    );
+  }
+
+  const companyInfo = data.companyInfo?.CompanyInfo;
+  if (companyInfo && typeof companyInfo === "object") {
+    addCsv("quickbooks-company-info.csv", [
+      companyInfo as Record<string, unknown>,
+    ]);
+  }
+
+  for (const definition of QB_REPORT_DEFINITIONS) {
+    addJson(definition.file, data[definition.key]);
+  }
 
   return files;
 }
@@ -201,6 +246,210 @@ const tokenCount = (
   usage: Record<string, number> | null | undefined,
   key: "input_tokens" | "output_tokens",
 ) => Math.max(0, Number(usage?.[key] ?? 0));
+
+type QuickBooksPushResult = {
+  entity: string;
+  id: string;
+  ok: boolean;
+  syncToken?: string;
+  error?: string;
+};
+
+function QuickBooksPushPanel({
+  file,
+  connected,
+  sessionId,
+}: {
+  file: OutputFile | null;
+  connected: boolean;
+  sessionId: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [pushing, setPushing] = useState(false);
+  const [error, setError] = useState("");
+  const [results, setResults] = useState<QuickBooksPushResult[] | null>(null);
+
+  const parsed = useMemo(() => {
+    if (!file) return { operations: [] as QuickBooksUpdateOperation[] };
+    try {
+      return parseQuickBooksUpdates(JSON.parse(file.content));
+    } catch {
+      return {
+        operations: [] as QuickBooksUpdateOperation[],
+        error: `${QUICKBOOKS_UPDATES_FILE} is not valid JSON.`,
+      };
+    }
+  }, [file]);
+
+  useEffect(() => {
+    setResults(null);
+    setError("");
+    setOpen(false);
+  }, [file?.content, sessionId]);
+
+  if (!file) return null;
+
+  const operations = parsed.operations ?? [];
+  const succeeded = results?.filter((item) => item.ok).length ?? 0;
+  const failed = results?.filter((item) => !item.ok).length ?? 0;
+
+  const push = async () => {
+    if (!operations.length) return;
+    setPushing(true);
+    setError("");
+    try {
+      const response = await fetch("/api/quickbooks/push", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-qb-confirm": "push",
+        },
+        body: JSON.stringify({ sessionId, operations }),
+      });
+      const data = (await response.json().catch(() => ({}))) as {
+        error?: string;
+        results?: QuickBooksPushResult[];
+      };
+      if (!response.ok) {
+        throw new Error(data.error || "Could not update QuickBooks.");
+      }
+      setResults(
+        Array.isArray(data.results) ? data.results : [],
+      );
+      setOpen(false);
+    } catch (reason) {
+      setError(
+        reason instanceof Error
+          ? reason.message
+          : "Could not update QuickBooks.",
+      );
+    } finally {
+      setPushing(false);
+    }
+  };
+
+  return (
+    <div className="bai-card p-5 md:p-6">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="label text-[#1F7A14]">QuickBooks write-back</p>
+          <h3 className="mt-1.5 font-display text-base font-bold">
+            Proposed record updates
+          </h3>
+          <p className="mt-1 max-w-xl text-[11px] leading-relaxed text-muted-foreground">
+            The agent proposed {operations.length} update
+            {operations.length === 1 ? "" : "s"} to existing QuickBooks
+            records. Review the exact fields before writing.
+          </p>
+        </div>
+        <Button
+          onClick={() => setOpen(true)}
+          disabled={!connected || !operations.length || Boolean(parsed.error)}
+        >
+          <Send className="h-3.5 w-3.5" />
+          Review &amp; push
+        </Button>
+      </div>
+
+      {parsed.error && (
+        <div className="mt-3 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-800">
+          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          {parsed.error} The updates will not be sent.
+        </div>
+      )}
+
+      {!connected && (
+        <p className="mt-3 text-[11px] text-amber-700">
+          Reconnect QuickBooks on the task screen to enable write-back.
+        </p>
+      )}
+
+      {results && (
+        <div className="mt-3 rounded-lg border border-ink/8 bg-white p-3">
+          <p className="text-[11px] font-semibold">
+            {succeeded} updated · {failed} failed
+          </p>
+          {failed > 0 && (
+            <ul className="mt-2 space-y-1">
+              {results
+                .filter((item) => !item.ok)
+                .map((item) => (
+                  <li
+                    key={`${item.entity}-${item.id}`}
+                    className="text-[10.5px] leading-relaxed text-red-600"
+                  >
+                    {item.entity} #{item.id}: {item.error}
+                  </li>
+                ))}
+            </ul>
+          )}
+          {succeeded > 0 && (
+            <p className="mt-2 text-[10.5px] text-emerald-700">
+              QuickBooks was updated. Re-import the QuickBooks data to refresh
+              your local snapshot.
+            </p>
+          )}
+        </div>
+      )}
+
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Push updates to QuickBooks</DialogTitle>
+            <DialogDescription>
+              These changes will be applied to your connected QuickBooks
+              company immediately. Review every operation first.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="max-h-72 space-y-2 overflow-y-auto rounded-xl border border-ink/8 bg-paper/60 p-3">
+            {operations.map((operation, index) => (
+              <div
+                key={`${operation.entity}-${operation.id}-${index}`}
+                className="rounded-lg border border-ink/8 bg-white p-3"
+              >
+                <p className="font-mono text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  {operation.entity} · Id {operation.id} · SyncToken{" "}
+                  {operation.syncToken}
+                </p>
+                <pre className="mt-1.5 max-h-32 overflow-auto whitespace-pre-wrap break-words font-mono text-[10px] leading-relaxed text-ink/80">
+                  {JSON.stringify(operation.fields, null, 2)}
+                </pre>
+              </div>
+            ))}
+          </div>
+
+          <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[10.5px] leading-relaxed text-amber-800">
+            <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            This updates existing records only and is sandbox-only by default.
+            Updates use each record&apos;s SyncToken; stale tokens or invalid
+            fields are rejected by QuickBooks per record.
+          </div>
+
+          {error && (
+            <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[11px] text-red-600">
+              {error}
+            </p>
+          )}
+
+          <DialogFooter>
+            <Button variant="line" onClick={() => setOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={() => void push()} disabled={pushing}>
+              {pushing ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Send className="h-3.5 w-3.5" />
+              )}
+              {pushing ? "Pushing…" : `Push ${operations.length} update${operations.length === 1 ? "" : "s"}`}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
 
 type PersistInput = {
   id: string;
@@ -269,6 +518,7 @@ export default function WorkspaceClient({
   const [qbSummary, setQbSummary] = useState<QbSummary | null>(null);
   const [qbDataLoading, setQbDataLoading] = useState(false);
   const [qbDataError, setQbDataError] = useState("");
+  const [qbDataWarning, setQbDataWarning] = useState("");
   const [qbImported, setQbImported] = useState(false);
   const [qbError, setQbError] = useState("");
   const abortRef = useRef<AbortController | null>(null);
@@ -408,12 +658,15 @@ export default function WorkspaceClient({
   const importQuickBooksData = async () => {
     setQbDataLoading(true);
     setQbDataError("");
+    setQbDataWarning("");
     try {
       const response = await fetch("/api/quickbooks/data?type=all", {
         cache: "no-store",
+        signal: AbortSignal.timeout(60_000),
       });
       const payload = (await response.json().catch(() => ({}))) as {
         data?: QuickBooksPayload;
+        errors?: Record<string, string>;
         error?: string;
       };
       if (!response.ok || !payload.data) {
@@ -421,6 +674,15 @@ export default function WorkspaceClient({
       }
 
       setQbSummary(summarizeQuickBooks(payload.data));
+
+      if (payload.errors && Object.keys(payload.errors).length) {
+        setQbDataWarning(
+          `Some record types could not be loaded: ${Object.keys(
+            payload.errors,
+          ).join(", ")}.`,
+        );
+      }
+
       const generated = quickBooksToFiles(payload.data);
       if (!generated.length) {
         setQbDataError(
@@ -436,7 +698,9 @@ export default function WorkspaceClient({
       const totalSize = combined.reduce((sum, file) => sum + file.size, 0);
       if (combined.length > QB_MAX_FILES || totalSize > QB_MAX_TOTAL_BYTES) {
         setQbDataError(
-          "QuickBooks data is larger than the task upload limit (10 files / 8 MB). Remove some files and retry.",
+          `QuickBooks data is larger than the task upload limit (${QB_MAX_FILES} files / ${Math.round(
+            QB_MAX_TOTAL_BYTES / 1_000_000,
+          )} MB). Remove some files and retry.`,
         );
         return;
       }
@@ -457,6 +721,7 @@ export default function WorkspaceClient({
   const connectQuickBooks = async () => {
     setQbError("");
     setQbDataError("");
+    setQbDataWarning("");
     setQbConnecting(true);
     try {
       const url = new URL(window.location.href);
@@ -492,6 +757,7 @@ export default function WorkspaceClient({
   const disconnectQuickBooks = async () => {
     setQbDataLoading(true);
     setQbDataError("");
+    setQbDataWarning("");
     try {
       const response = await fetch("/api/quickbooks/status", {
         method: "DELETE",
@@ -638,6 +904,8 @@ export default function WorkspaceClient({
     setError("");
     setCleanupDone(false);
     setQbImported(false);
+    setQbDataError("");
+    setQbDataWarning("");
     qbAutoImportRef.current = false;
     setRunProgress(0);
     setActiveSessionId(createSessionId());
@@ -648,21 +916,30 @@ export default function WorkspaceClient({
     setError("");
     const incoming = Array.from(list);
     if (
-      files.length + incoming.length > 10 ||
+      files.length + incoming.length > MAX_TASK_FILES ||
       incoming.some(
         (file) =>
-          !file.name.toLowerCase().endsWith(".csv") || file.size > 2_000_000,
+          !file.name.toLowerCase().endsWith(".csv") ||
+          file.size > MAX_TASK_FILE_BYTES,
       )
     ) {
-      setError("Choose up to 10 CSV files, each 2 MB or smaller.");
+      setError(
+        `Choose up to ${MAX_TASK_FILES} CSV files, each ${Math.round(
+          MAX_TASK_FILE_BYTES / 1_000_000,
+        )} MB or smaller.`,
+      );
       return;
     }
     if (
       files.reduce((sum, file) => sum + file.size, 0) +
         incoming.reduce((sum, file) => sum + file.size, 0) >
-      8_000_000
+      MAX_TASK_TOTAL_BYTES
     ) {
-      setError("The combined upload limit is 8 MB.");
+      setError(
+        `The combined upload limit is ${Math.round(
+          MAX_TASK_TOTAL_BYTES / 1_000_000,
+        )} MB.`,
+      );
       return;
     }
     const loaded = await Promise.all(
@@ -1215,7 +1492,8 @@ export default function WorkspaceClient({
                       <div>
                         <p className="label">Task files</p>
                         <p className="mt-1 text-[11px] text-muted-foreground">
-                          CSV · up to 10 files, 8 MB total
+                          CSV · up to {MAX_TASK_FILES} files,{" "}
+                          {Math.round(MAX_TASK_TOTAL_BYTES / 1_000_000)} MB total
                         </p>
                       </div>
                       <UploadCloud className="h-5 w-5 text-primary" />
@@ -1226,7 +1504,8 @@ export default function WorkspaceClient({
                         Drop files here or browse
                       </span>
                       <span className="mt-1 text-[10px] text-muted-foreground">
-                        CSV files, 2 MB maximum each
+                        CSV files, {Math.round(MAX_TASK_FILE_BYTES / 1_000_000)} MB
+                        maximum each
                       </span>
                       <input
                         className="sr-only"
@@ -1359,13 +1638,32 @@ export default function WorkspaceClient({
                             ? "Reading your QuickBooks data…"
                             : qbImported
                               ? "QuickBooks records are part of this task."
-                              : "Import customers, vendors, items, invoices and reports into this task."}
+                              : "Import all QuickBooks record types and reports into this task."}
                         </p>
                         {qbSummary && (
-                          <p className="mt-1.5 font-mono text-[9.5px] leading-relaxed text-emerald-800/80">
-                            {qbSummary.customers} customers ·{" "}
-                            {qbSummary.vendors} vendors · {qbSummary.items}{" "}
-                            items · {qbSummary.invoices} invoices
+                          <div className="mt-1.5 space-y-1">
+                            <p className="font-mono text-[9.5px] leading-relaxed text-emerald-800/80">
+                              {qbSummary.records} records · {qbSummary.files}{" "}
+                              files
+                              {qbSummary.reports.length
+                                ? ` · ${qbSummary.reports.length} reports`
+                                : ""}
+                            </p>
+                            {qbSummary.entities.length > 0 && (
+                              <p className="text-[9.5px] leading-relaxed text-emerald-800/70">
+                                {qbSummary.entities
+                                  .map(
+                                    (entity) =>
+                                      `${entity.label}: ${entity.count}`,
+                                  )
+                                  .join(" · ")}
+                              </p>
+                            )}
+                          </div>
+                        )}
+                        {qbDataWarning && (
+                          <p className="mt-1.5 text-[10px] leading-relaxed text-amber-700">
+                            {qbDataWarning}
                           </p>
                         )}
                         {qbDataError && (
@@ -1834,6 +2132,15 @@ export default function WorkspaceClient({
                     </div>
                   )}
                 </div>
+                <QuickBooksPushPanel
+                  file={
+                    outputs.find(
+                      (file) => file.name === QUICKBOOKS_UPDATES_FILE,
+                    ) ?? null
+                  }
+                  connected={qbConnected}
+                  sessionId={activeSessionId}
+                />
                 <div className="bai-card p-5">
                   <label className="block text-xs font-semibold">
                     Revision note{" "}
@@ -1919,6 +2226,17 @@ export default function WorkspaceClient({
                     ))}
                   </div>
                 )}
+                <div className="mt-5">
+                  <QuickBooksPushPanel
+                    file={
+                      outputs.find(
+                        (file) => file.name === QUICKBOOKS_UPDATES_FILE,
+                      ) ?? null
+                    }
+                    connected={qbConnected}
+                    sessionId={activeSessionId}
+                  />
+                </div>
                 <div className="mt-6 flex flex-wrap items-center gap-3">
                   {cleanupDone ? (
                     <Button onClick={resetTask}>
@@ -2056,38 +2374,47 @@ export default function WorkspaceClient({
                     </span>
                   </div>
                   {qbSummary ? (
-                    <dl className="mt-2 grid grid-cols-2 gap-1.5 text-[10.5px]">
-                      <div className="flex justify-between rounded-lg bg-white px-2 py-1.5">
-                        <dt className="text-muted-foreground">Customers</dt>
-                        <dd className="font-semibold">{qbSummary.customers}</dd>
-                      </div>
-                      <div className="flex justify-between rounded-lg bg-white px-2 py-1.5">
-                        <dt className="text-muted-foreground">Vendors</dt>
-                        <dd className="font-semibold">{qbSummary.vendors}</dd>
-                      </div>
-                      <div className="flex justify-between rounded-lg bg-white px-2 py-1.5">
-                        <dt className="text-muted-foreground">Items</dt>
-                        <dd className="font-semibold">{qbSummary.items}</dd>
-                      </div>
-                      <div className="flex justify-between rounded-lg bg-white px-2 py-1.5">
-                        <dt className="text-muted-foreground">Invoices</dt>
-                        <dd className="font-semibold">{qbSummary.invoices}</dd>
-                      </div>
-                      <div className="col-span-2 flex justify-between rounded-lg bg-white px-2 py-1.5">
-                        <dt className="text-muted-foreground">
-                          Financial reports
-                        </dt>
-                        <dd className="font-semibold">
-                          {(qbSummary.profitAndLoss ? 1 : 0) +
-                            (qbSummary.balanceSheet ? 1 : 0)}
-                          /2
-                        </dd>
-                      </div>
-                    </dl>
+                    <div className="mt-2 space-y-2">
+                      <p className="rounded-lg bg-white px-2 py-1.5 text-[10.5px] font-semibold">
+                        {qbSummary.records} records · {qbSummary.files} files
+                        {qbSummary.reports.length
+                          ? ` · ${qbSummary.reports.length} reports`
+                          : ""}
+                      </p>
+                      <dl className="grid max-h-56 grid-cols-2 gap-1.5 overflow-y-auto text-[10.5px]">
+                        {qbSummary.entities.map((entity) => (
+                          <div
+                            key={entity.file}
+                            className="flex justify-between rounded-lg bg-white px-2 py-1.5"
+                          >
+                            <dt className="text-muted-foreground">
+                              {entity.label}
+                            </dt>
+                            <dd className="font-semibold">{entity.count}</dd>
+                          </div>
+                        ))}
+                        {qbSummary.reports.map((report) => (
+                          <div
+                            key={report.file}
+                            className="flex justify-between rounded-lg bg-white px-2 py-1.5"
+                          >
+                            <dt className="text-muted-foreground">
+                              {report.label}
+                            </dt>
+                            <dd className="font-semibold">✓</dd>
+                          </div>
+                        ))}
+                      </dl>
+                    </div>
                   ) : (
                     <p className="mt-2 text-[10.5px] leading-relaxed text-muted-foreground">
-                      Load customers, vendors, items, invoices and financial
-                      reports to use them in this task.
+                      Load all available QuickBooks record types and reports to
+                      use them in this task.
+                    </p>
+                  )}
+                  {qbDataWarning && (
+                    <p className="mt-2 text-[10.5px] leading-relaxed text-amber-700">
+                      {qbDataWarning}
                     </p>
                   )}
                   {qbDataError && (

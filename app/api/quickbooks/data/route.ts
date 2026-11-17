@@ -1,22 +1,30 @@
 import { loadTokens, qbApiRequest } from "@/lib/quickbooks";
+import {
+  QB_RECORD_DEFINITIONS,
+  QB_REPORT_DEFINITIONS,
+  type QuickBooksRecordDefinition,
+} from "@/lib/quickbooks-entities";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+const PAGE_SIZE = 1000;
+const MAX_PAGES = 5;
+
+const errorText = (error: unknown) =>
+  error instanceof Error ? error.message : "Unknown QuickBooks error";
+
 /**
  * GET /api/quickbooks/data
  *
- * Fetch company data from QuickBooks. Queries multiple endpoints
- * and returns a combined payload. Auto-refreshes expired tokens.
+ * Fetch company data from QuickBooks. Queries every record type and report
+ * listed in lib/quickbooks-entities.ts and returns a combined payload.
  *
  * Query params:
  *   ?type=all (default) — fetch everything
- *   ?type=company — just company info
- *   ?type=invoices — invoices
- *   ?type=customers — customers
- *   ?type=vendors — vendors
- *   ?type=items — products / inventory
- *   ?type=reports — financial reports (P&L, Balance Sheet)
+ *   ?type=company — company info
+ *   ?type=reports — financial reports
+ *   ?type=invoices|customers|vendors|items|... — one record type
  */
 export async function GET(request: Request) {
   const tokens = await loadTokens();
@@ -30,78 +38,97 @@ export async function GET(request: Request) {
   const url = new URL(request.url);
   const type = url.searchParams.get("type") || "all";
 
+  const selectedRecords: QuickBooksRecordDefinition[] =
+    type === "all" || type === "company" || type === "reports"
+      ? QB_RECORD_DEFINITIONS
+      : QB_RECORD_DEFINITIONS.filter(
+          (definition) =>
+            definition.key === type ||
+            definition.entity.toLowerCase() === type.toLowerCase(),
+        );
+
+  if (
+    type !== "all" &&
+    type !== "company" &&
+    type !== "reports" &&
+    selectedRecords.length === 0
+  ) {
+    return Response.json(
+      { error: `Unknown QuickBooks record type: ${type}` },
+      { status: 400 },
+    );
+  }
+
   try {
     const result: Record<string, unknown> = {};
+    const errors: Record<string, string> = {};
     let currentTokens = tokens;
 
-    // Helper to make a request and keep tokens updated
-    const query = async <T = Record<string, unknown>>(
-      endpoint: string,
-      key: string,
-    ) => {
-      const { data, tokens: updatedTokens } = await qbApiRequest<T>(
-        endpoint,
-        currentTokens,
-      );
+    const query = async (endpoint: string, key: string) => {
+      const { data, tokens: updatedTokens } = await qbApiRequest<Record<
+        string,
+        unknown
+      >>(endpoint, currentTokens);
       currentTokens = updatedTokens;
       result[key] = data;
     };
 
-    // Company Info (always fetched for context)
+    const fetchAllRecords = async (definition: QuickBooksRecordDefinition) => {
+      const rows: unknown[] = [];
+      for (let page = 0; page < MAX_PAGES; page += 1) {
+        const startPosition = page * PAGE_SIZE + 1;
+        const statement = `SELECT * FROM ${definition.entity} STARTPOSITION ${startPosition} MAXRESULTS ${PAGE_SIZE}`;
+        const { data, tokens: updatedTokens } = await qbApiRequest<{
+          QueryResponse?: Record<string, unknown[]>;
+        }>(`query?query=${encodeURIComponent(statement)}`, currentTokens);
+        currentTokens = updatedTokens;
+        const pageRows = data.QueryResponse?.[definition.entity];
+        if (!Array.isArray(pageRows)) break;
+        rows.push(...pageRows);
+        if (pageRows.length < PAGE_SIZE) break;
+      }
+      result[definition.key] = {
+        QueryResponse: { [definition.entity]: rows },
+      };
+    };
+
     if (type === "all" || type === "company") {
-      await query(`companyinfo/${currentTokens.realm_id}`, "companyInfo");
+      try {
+        await query(
+          `companyinfo/${currentTokens.realm_id}`,
+          "companyInfo",
+        );
+      } catch (error) {
+        errors.companyInfo = errorText(error);
+      }
     }
 
-    const entityQuery = (entity: string) =>
-      `query?query=${encodeURIComponent(
-        `SELECT * FROM ${entity} MAXRESULTS 100`,
-      )}`;
-
-    // Customers
-    if (type === "all" || type === "customers") {
-      await query(entityQuery("Customer"), "customers");
+    const shouldFetchRecords = type !== "company" && type !== "reports";
+    if (shouldFetchRecords) {
+      for (const definition of selectedRecords) {
+        try {
+          await fetchAllRecords(definition);
+        } catch (error) {
+          errors[definition.key] = errorText(error);
+        }
+      }
     }
 
-    // Vendors
-    if (type === "all" || type === "vendors") {
-      await query(entityQuery("Vendor"), "vendors");
-    }
-
-    // Items (Products / Inventory)
-    if (type === "all" || type === "items") {
-      await query(entityQuery("Item"), "items");
-    }
-
-    // Invoices
-    if (type === "all" || type === "invoices") {
-      await query(entityQuery("Invoice"), "invoices");
-    }
-
-    // Financial reports
     if (type === "all" || type === "reports") {
-      // Profit and Loss
-      await query(
-        "reports/ProfitAndLoss?date_macro=This Fiscal Year-to-date",
-        "profitAndLoss",
-      ).catch((err) => {
-        console.warn("P&L report fetch failed:", err);
-        result.profitAndLoss = null;
-      });
-
-      // Balance Sheet
-      await query(
-        "reports/BalanceSheet?date_macro=This Fiscal Year-to-date",
-        "balanceSheet",
-      ).catch((err) => {
-        console.warn("Balance Sheet report fetch failed:", err);
-        result.balanceSheet = null;
-      });
+      for (const definition of QB_REPORT_DEFINITIONS) {
+        try {
+          await query(definition.endpoint, definition.key);
+        } catch (error) {
+          errors[definition.key] = errorText(error);
+        }
+      }
     }
 
     return Response.json({
       ok: true,
       realmId: currentTokens.realm_id,
       data: result,
+      errors,
     });
   } catch (error) {
     console.error("QuickBooks data fetch error:", error);
