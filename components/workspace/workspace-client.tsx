@@ -12,6 +12,8 @@ import {
   Cloud,
   DatabaseZap,
   Download,
+  Eye,
+  EyeOff,
   FileText,
   GitBranch,
   Loader2,
@@ -173,6 +175,13 @@ export default function WorkspaceClient({
   const [cleanupOpen, setCleanupOpen] = useState(false);
   const [cleanupDone, setCleanupDone] = useState(false);
   const [runProgress, setRunProgress] = useState(0);
+  const [qbDialogOpen, setQbDialogOpen] = useState(false);
+  const [qbEmail, setQbEmail] = useState("");
+  const [qbPassword, setQbPassword] = useState("");
+  const [qbShowPassword, setQbShowPassword] = useState(false);
+  const [qbConnecting, setQbConnecting] = useState(false);
+  const [qbConnected, setQbConnected] = useState(false);
+  const [qbError, setQbError] = useState("");
   const abortRef = useRef<AbortController | null>(null);
   const traceRef = useRef<HTMLDivElement | null>(null);
   const inputEstimate =
@@ -975,6 +984,53 @@ export default function WorkspaceClient({
                         ))}
                       </ul>
                     )}
+
+                    {/* Divider */}
+                    <div className="relative mt-5 mb-1">
+                      <div className="absolute inset-0 flex items-center">
+                        <div className="w-full border-t border-ink/10" />
+                      </div>
+                      <div className="relative flex justify-center">
+                        <span className="bg-white px-3 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+                          or import from
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Connect with QuickBooks Button */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (!qbConnected) {
+                          setQbError("");
+                          setQbEmail("");
+                          setQbPassword("");
+                          setQbShowPassword(false);
+                          setQbConnecting(false);
+                          setQbDialogOpen(true);
+                        }
+                      }}
+                      className={`mt-3 flex w-full items-center justify-center gap-2.5 rounded-xl border px-4 py-3 text-xs font-semibold transition-all duration-200 ${
+                        qbConnected
+                          ? "border-emerald-200 bg-emerald-50 text-emerald-700 cursor-default"
+                          : "border-ink/15 bg-white text-ink hover:border-[#2CA01C]/40 hover:bg-[#2CA01C]/[0.04] hover:shadow-sm"
+                      }`}
+                    >
+                      {/* QuickBooks Logo SVG */}
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <circle cx="12" cy="12" r="11" fill="#2CA01C" />
+                        <path d="M7.5 7.5C6.12 7.5 5 8.62 5 10v4c0 1.38 1.12 2.5 2.5 2.5H9v-1.5H7.5c-.55 0-1-.45-1-1v-4c0-.55.45-1 1-1H9V14.5c0 1.38 1.12 2.5 2.5 2.5V7.5H7.5z" fill="white" />
+                        <path d="M16.5 16.5c1.38 0 2.5-1.12 2.5-2.5v-4c0-1.38-1.12-2.5-2.5-2.5H15v1.5h1.5c.55 0 1 .45 1 1v4c0 .55-.45 1-1 1H15V9.5c0-1.38-1.12-2.5-2.5-2.5v9.5h4z" fill="white" />
+                      </svg>
+                      {qbConnected ? (
+                        <>
+                          Connected to QuickBooks
+                          <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                        </>
+                      ) : (
+                        "Connect with QuickBooks"
+                      )}
+                    </button>
                   </div>
                   <div className="bai-card p-5">
                     <p className="label">Task prompt</p>
@@ -1568,6 +1624,147 @@ export default function WorkspaceClient({
               Pay {money(estimatedCharge)} credits & run
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* QuickBooks Connection Dialog */}
+      <Dialog open={qbDialogOpen} onOpenChange={setQbDialogOpen}>
+        <DialogContent className="max-w-md rounded-2xl p-0 overflow-hidden">
+          {/* Green Header */}
+          <div className="bg-gradient-to-br from-[#2CA01C] to-[#1F7A14] px-6 pt-7 pb-5 text-center text-white">
+            <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-white/20 backdrop-blur-sm">
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <circle cx="12" cy="12" r="11" fill="white" fillOpacity="0.2" />
+                <path d="M7.5 7.5C6.12 7.5 5 8.62 5 10v4c0 1.38 1.12 2.5 2.5 2.5H9v-1.5H7.5c-.55 0-1-.45-1-1v-4c0-.55.45-1 1-1H9V14.5c0 1.38 1.12 2.5 2.5 2.5V7.5H7.5z" fill="white" />
+                <path d="M16.5 16.5c1.38 0 2.5-1.12 2.5-2.5v-4c0-1.38-1.12-2.5-2.5-2.5H15v1.5h1.5c.55 0 1 .45 1 1v4c0 .55-.45 1-1 1H15V9.5c0-1.38-1.12-2.5-2.5-2.5v9.5h4z" fill="white" />
+              </svg>
+            </div>
+            <DialogHeader>
+              <DialogTitle className="font-display text-xl text-white">
+                {qbConnected ? "Connected!" : "Connect to QuickBooks"}
+              </DialogTitle>
+              <DialogDescription className="mt-1 text-white/80 text-xs">
+                {qbConnected
+                  ? "Your QuickBooks account has been linked successfully."
+                  : "Sign in with your Intuit account to import data directly."}
+              </DialogDescription>
+            </DialogHeader>
+          </div>
+
+          <div className="px-6 pb-6 pt-4">
+            {qbConnected ? (
+              /* ---- Success State ---- */
+              <div className="flex flex-col items-center gap-3 py-4">
+                <div className="flex h-14 w-14 items-center justify-center rounded-full bg-emerald-100">
+                  <CheckCircle2 className="h-7 w-7 text-emerald-600" />
+                </div>
+                <p className="text-sm font-medium text-emerald-700">
+                  QuickBooks is connected
+                </p>
+                <p className="max-w-xs text-center text-[11px] leading-relaxed text-muted-foreground">
+                  Your financial data can now be imported directly into the agent task. You can disconnect anytime from your account settings.
+                </p>
+                <Button
+                  type="button"
+                  className="mt-2"
+                  onClick={() => setQbDialogOpen(false)}
+                >
+                  <Check className="h-3.5 w-3.5" />
+                  Done
+                </Button>
+              </div>
+            ) : qbConnecting ? (
+              /* ---- Connecting State ---- */
+              <div className="flex flex-col items-center gap-3 py-8">
+                <Loader2 className="h-8 w-8 animate-spin text-[#2CA01C]" />
+                <p className="text-sm font-medium">Connecting to QuickBooks…</p>
+                <p className="text-[11px] text-muted-foreground">Authorizing your account securely.</p>
+              </div>
+            ) : (
+              /* ---- Login Form ---- */
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  if (!qbEmail.trim() || !qbPassword.trim()) {
+                    setQbError("Please enter both email and password.");
+                    return;
+                  }
+                  setQbError("");
+                  setQbConnecting(true);
+                  // Simulate OAuth connection delay
+                  setTimeout(() => {
+                    setQbConnecting(false);
+                    setQbConnected(true);
+                  }, 2200);
+                }}
+                className="space-y-4"
+              >
+                {qbError && (
+                  <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[11px] text-red-600">
+                    {qbError}
+                  </div>
+                )}
+                <div>
+                  <label className="mb-1.5 block text-[11px] font-semibold text-ink/70">
+                    Email or User ID
+                  </label>
+                  <input
+                    type="text"
+                    value={qbEmail}
+                    onChange={(e) => setQbEmail(e.target.value)}
+                    placeholder="you@company.com"
+                    className="w-full rounded-xl border border-ink/12 bg-white px-3.5 py-2.5 text-[12px] outline-none transition placeholder:text-ink/30 focus:border-[#2CA01C]/50 focus:ring-2 focus:ring-[#2CA01C]/10"
+                    autoFocus
+                  />
+                </div>
+                <div>
+                  <label className="mb-1.5 block text-[11px] font-semibold text-ink/70">
+                    Password
+                  </label>
+                  <div className="relative">
+                    <input
+                      type={qbShowPassword ? "text" : "password"}
+                      value={qbPassword}
+                      onChange={(e) => setQbPassword(e.target.value)}
+                      placeholder="Enter your password"
+                      className="w-full rounded-xl border border-ink/12 bg-white px-3.5 py-2.5 pr-10 text-[12px] outline-none transition placeholder:text-ink/30 focus:border-[#2CA01C]/50 focus:ring-2 focus:ring-[#2CA01C]/10"
+                    />
+                    <button
+                      type="button"
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-ink transition-colors"
+                      onClick={() => setQbShowPassword((v) => !v)}
+                      tabIndex={-1}
+                    >
+                      {qbShowPassword ? (
+                        <EyeOff className="h-4 w-4" />
+                      ) : (
+                        <Eye className="h-4 w-4" />
+                      )}
+                    </button>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <LockKeyhole className="h-3 w-3 text-muted-foreground" />
+                  <span className="text-[10px] text-muted-foreground">
+                    Secured by Intuit. Your credentials are never stored.
+                  </span>
+                </div>
+                <button
+                  type="submit"
+                  className="w-full rounded-xl bg-[#2CA01C] px-4 py-2.5 text-[13px] font-semibold text-white shadow-sm transition-all hover:bg-[#248B17] hover:shadow-md active:scale-[0.98] disabled:opacity-60"
+                  disabled={qbConnecting}
+                >
+                  Sign In & Connect
+                </button>
+                <p className="text-center text-[10px] text-muted-foreground">
+                  By connecting you agree to Intuit&apos;s{" "}
+                  <a href="#" className="underline hover:text-ink">Terms of Service</a>{" "}
+                  and{" "}
+                  <a href="#" className="underline hover:text-ink">Privacy Policy</a>.
+                </p>
+              </form>
+            )}
+          </div>
         </DialogContent>
       </Dialog>
 
