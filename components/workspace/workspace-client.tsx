@@ -6,6 +6,7 @@ import {
   AlertTriangle,
   ArrowLeft,
   ArrowRight,
+  Bot,
   Box,
   Check,
   CheckCircle2,
@@ -488,6 +489,10 @@ export default function WorkspaceClient({
   const [qbDataWarning, setQbDataWarning] = useState("");
   const [qbImported, setQbImported] = useState(false);
   const [qbError, setQbError] = useState("");
+  const [mcpConnected, setMcpConnected] = useState(false);
+  const [mcpConnecting, setMcpConnecting] = useState(false);
+  const [mcpNotice, setMcpNotice] = useState("");
+  const [mcpError, setMcpError] = useState("");
   const abortRef = useRef<AbortController | null>(null);
   const traceRef = useRef<HTMLDivElement | null>(null);
   const qbAutoImportRef = useRef(false);
@@ -622,6 +627,27 @@ export default function WorkspaceClient({
     }
   };
 
+  const refreshMcpStatus = async (): Promise<boolean> => {
+    try {
+      const response = await fetch("/api/mcp/connector/status", {
+        cache: "no-store",
+        signal: AbortSignal.timeout(15_000),
+      });
+      const data = (await response.json().catch(() => ({}))) as {
+        connected?: boolean;
+        error?: string;
+      };
+      const connected = Boolean(data.connected);
+      setMcpConnected(connected);
+      if (!response.ok && data.error) setMcpError(data.error);
+      return connected;
+    } catch {
+      setMcpConnected(false);
+      setMcpError("The MCP Connector is unavailable. Please try again shortly.");
+      return false;
+    }
+  };
+
   const importQuickBooksData = async () => {
     setQbDataLoading(true);
     setQbDataError("");
@@ -721,6 +747,49 @@ export default function WorkspaceClient({
     }
   };
 
+  const connectMcp = async () => {
+    setMcpError("");
+    setMcpNotice("");
+    setMcpConnecting(true);
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.delete("qb");
+      url.searchParams.delete("reason");
+      url.searchParams.delete("mcp");
+      url.searchParams.delete("mcpReason");
+      url.searchParams.set("mcp", "1");
+      const returnTo = `${url.pathname}${url.search}`;
+      const response = await fetch(
+        `/api/mcp/connector/auth?returnTo=${encodeURIComponent(returnTo)}`,
+        { cache: "no-store" },
+      );
+      const data = (await response.json().catch(() => ({}))) as {
+        authUrl?: string;
+        connected?: boolean;
+        error?: string;
+      };
+      if (!response.ok) {
+        throw new Error(data.error || "MCP Connector is not configured yet.");
+      }
+      if (data.connected) {
+        setMcpConnected(true);
+        setMcpNotice("MCP connected successfully. Ask Claude in the task prompt.");
+        await refreshMcpStatus();
+        return;
+      }
+      if (!data.authUrl) throw new Error("QuickBooks login is unavailable.");
+      window.location.assign(data.authUrl);
+    } catch (reason) {
+      setMcpError(
+        reason instanceof Error
+          ? reason.message
+          : "Could not connect the MCP Connector.",
+      );
+    } finally {
+      setMcpConnecting(false);
+    }
+  };
+
   const disconnectQuickBooks = async () => {
     setQbDataLoading(true);
     setQbDataError("");
@@ -730,11 +799,17 @@ export default function WorkspaceClient({
         method: "DELETE",
       });
       if (!response.ok) throw new Error("Disconnect failed");
+      await fetch("/api/mcp/connector/status", { method: "DELETE" }).catch(
+        () => undefined,
+      );
       setQbConnected(false);
       setQbCompanyName(null);
       setQbRealmId(null);
       setQbSummary(null);
       setQbImported(false);
+      setMcpConnected(false);
+      setMcpNotice("");
+      setMcpError("");
       qbAutoImportRef.current = false;
       setFiles((current) =>
         current.filter((file) => !file.name.startsWith("quickbooks-")),
@@ -752,18 +827,38 @@ export default function WorkspaceClient({
     const params = new URLSearchParams(window.location.search);
     const qb = params.get("qb");
     const reason = params.get("reason");
+    const mcp = params.get("mcp");
+    const mcpReason = params.get("mcpReason");
 
     if (qb === "error") {
       setQbError(qbErrorMessage(reason));
+    }
+    if (mcp === "error") {
+      setMcpError(qbErrorMessage(mcpReason));
     }
 
     const initialise = async () => {
       const connected = await refreshQbStatus();
       if (cancelled) return;
-      if (connected && qb === "connected") {
+      if (connected && qb === "connected" && !mcp) {
         setQbDialogOpen(true);
       }
+      const mcpReady = mcp ? await refreshMcpStatus() : false;
+      if (cancelled) return;
+      if (mcpReady) {
+        setMcpNotice("MCP connected successfully. Ask Claude in the task prompt.");
+      }
       if (qb) stripQbParams();
+      if (mcp) {
+        const url = new URL(window.location.href);
+        url.searchParams.delete("mcp");
+        url.searchParams.delete("mcpReason");
+        window.history.replaceState(
+          null,
+          "",
+          `${url.pathname}${url.search}${url.hash}`,
+        );
+      }
     };
 
     void initialise();
@@ -1454,7 +1549,7 @@ export default function WorkspaceClient({
                   </div>
                 </div>
                 <div className="grid gap-4 xl:grid-cols-[0.9fr_1.1fr]">
-                  <div className="bai-card p-5">
+                  <div className="bai-card p-5 max-h-[430px] overflow-y-auto pr-2">
                     <div className="flex items-center justify-between">
                       <div>
                         <p className="label">Task files</p>
@@ -1658,6 +1753,63 @@ export default function WorkspaceClient({
                         </div>
                       </div>
                     )}
+
+                    {/* Divider */}
+                    <div className="relative mt-5 mb-1">
+                      <div className="absolute inset-0 flex items-center">
+                        <div className="w-full border-t border-ink/10" />
+                      </div>
+                      <div className="relative flex justify-center">
+                        <span className="bg-white px-3 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+                          or
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="mt-3 rounded-xl border border-primary/20 bg-primary/[0.03] p-3.5">
+                      <div className="flex items-start gap-3">
+                        <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary">
+                          <Bot className="h-4 w-4" />
+                        </span>
+                        <div className="min-w-0">
+                          <p className="text-xs font-semibold">MCP Connector</p>
+                          <p className="mt-1 text-[10.5px] leading-relaxed text-muted-foreground">
+                            Chat with AI about your QuickBooks company
+                            through our secure MCP server.
+                          </p>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => void connectMcp()}
+                        disabled={mcpConnecting || mcpConnected}
+                        className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg border border-primary/20 bg-white px-4 py-2 text-[11px] font-semibold text-primary transition hover:border-primary/40 hover:bg-primary/[0.04] disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {mcpConnecting ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <Sparkles className="h-3.5 w-3.5" />
+                        )}
+                        {mcpConnecting
+                          ? "Connecting to QuickBooks…"
+                          : mcpConnected
+                            ? "MCP Connected"
+                            : "Connect MCP"}
+                        {!mcpConnected && <ArrowRight className="h-3.5 w-3.5" />}
+                      </button>
+                      {mcpNotice && (
+                        <p className="mt-2 flex items-start gap-1.5 text-[10px] leading-relaxed text-emerald-700">
+                          <CheckCircle2 className="mt-0.5 h-3 w-3 shrink-0" />
+                          {mcpNotice}
+                        </p>
+                      )}
+                      {mcpError && (
+                        <p className="mt-2 flex items-start gap-1.5 text-[10px] leading-relaxed text-red-700">
+                          <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
+                          {mcpError}
+                        </p>
+                      )}
+                    </div>
                   </div>
                   <div className="bai-card p-5">
                     <p className="label">Task prompt</p>
@@ -1681,7 +1833,9 @@ export default function WorkspaceClient({
                     Files stay in browser memory until you continue.
                   </p> */}
                   <Button
-                    disabled={!files.length || !prompt.trim()}
+                    disabled={
+                      (!files.length && !mcpConnected) || !prompt.trim()
+                    }
                     onClick={() => {
                       setError("");
                       setStage("runtime");

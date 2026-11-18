@@ -37,24 +37,24 @@ function getModelCandidates(): string[] {
   return Array.from(new Set([model, ...fallbacks].filter(Boolean)));
 }
 
-type ToolUse = {
+export type ToolUse = {
   type: "tool_use";
   id: string;
   name: string;
   input: Record<string, unknown>;
 };
 
-type ContentBlock =
+export type ContentBlock =
   | { type: "text"; text: string }
   | ToolUse
   | { type: string; [key: string]: unknown };
 
-type ClaudeMessage = {
+export type ClaudeMessage = {
   role: "user" | "assistant";
   content: string | ContentBlock[];
 };
 
-type ClaudeResponse = {
+export type ClaudeResponse = {
   content: ContentBlock[];
   stop_reason: string | null;
   usage?: { input_tokens?: number; output_tokens?: number };
@@ -218,10 +218,11 @@ async function executeTool(
   throw new Error(`Unknown tool: ${name}`);
 }
 
-async function callClaude(
+export async function callClaude(
   messages: ClaudeMessage[],
   system: string,
   signal: AbortSignal,
+  tools?: Record<string, unknown>[],
 ): Promise<ClaudeResponse> {
   const { apiKey, authToken } = getClaudeConfig();
   if (!apiKey && !authToken) {
@@ -250,7 +251,7 @@ async function callClaude(
           max_tokens: 8192,
           system,
           messages,
-          tools: TOOLS,
+          tools: tools ?? TOOLS,
         }),
         signal,
       });
