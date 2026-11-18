@@ -280,9 +280,7 @@ function QuickBooksPushPanel({
       if (!response.ok) {
         throw new Error(data.error || "Could not update QuickBooks.");
       }
-      setResults(
-        Array.isArray(data.results) ? data.results : [],
-      );
+      setResults(Array.isArray(data.results) ? data.results : []);
       setOpen(false);
     } catch (reason) {
       setError(
@@ -305,8 +303,8 @@ function QuickBooksPushPanel({
           </h3>
           <p className="mt-1 max-w-xl text-[11px] leading-relaxed text-muted-foreground">
             The agent proposed {operations.length} update
-            {operations.length === 1 ? "" : "s"} to existing QuickBooks
-            records. Review the exact fields before writing.
+            {operations.length === 1 ? "" : "s"} to existing QuickBooks records.
+            Review the exact fields before writing.
           </p>
         </div>
         <Button
@@ -364,8 +362,8 @@ function QuickBooksPushPanel({
           <DialogHeader>
             <DialogTitle>Push updates to QuickBooks</DialogTitle>
             <DialogDescription>
-              These changes will be applied to your connected QuickBooks
-              company immediately. Review every operation first.
+              These changes will be applied to your connected QuickBooks company
+              immediately. Review every operation first.
             </DialogDescription>
           </DialogHeader>
 
@@ -409,7 +407,9 @@ function QuickBooksPushPanel({
               ) : (
                 <Send className="h-3.5 w-3.5" />
               )}
-              {pushing ? "Pushing…" : `Push ${operations.length} update${operations.length === 1 ? "" : "s"}`}
+              {pushing
+                ? "Pushing…"
+                : `Push ${operations.length} update${operations.length === 1 ? "" : "s"}`}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1460,7 +1460,8 @@ export default function WorkspaceClient({
                         <p className="label">Task files</p>
                         <p className="mt-1 text-[11px] text-muted-foreground">
                           CSV · up to {MAX_TASK_FILES} files,{" "}
-                          {Math.round(MAX_TASK_TOTAL_BYTES / 1_000_000)} MB total
+                          {Math.round(MAX_TASK_TOTAL_BYTES / 1_000_000)} MB
+                          total
                         </p>
                       </div>
                       <UploadCloud className="h-5 w-5 text-primary" />
@@ -1471,8 +1472,8 @@ export default function WorkspaceClient({
                         Drop files here or browse
                       </span>
                       <span className="mt-1 text-[10px] text-muted-foreground">
-                        CSV files, {Math.round(MAX_TASK_FILE_BYTES / 1_000_000)} MB
-                        maximum each
+                        CSV files, {Math.round(MAX_TASK_FILE_BYTES / 1_000_000)}{" "}
+                        MB maximum each
                       </span>
                       <input
                         className="sr-only"
@@ -1675,10 +1676,10 @@ export default function WorkspaceClient({
                     </p>
                   </div>
                 </div>
-                <div className="flex items-center justify-between gap-3">
-                  <p className="text-[10.5px] text-muted-foreground">
+                <div className="flex items-center justify-end gap-3">
+                  {/* <p className="text-[10.5px] text-muted-foreground">
                     Files stay in browser memory until you continue.
-                  </p>
+                  </p> */}
                   <Button
                     disabled={!files.length || !prompt.trim()}
                     onClick={() => {
@@ -2224,9 +2225,9 @@ export default function WorkspaceClient({
           </section>
         </div>
 
-        <div className="mt-7">
+        {/* <div className="mt-7">
           <SessionHistory sessions={sessions} onDelete={deleteSessionRecord} />
-        </div>
+        </div> */}
       </main>
 
       <Dialog open={paymentOpen} onOpenChange={setPaymentOpen}>
