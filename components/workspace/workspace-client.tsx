@@ -76,6 +76,7 @@ type QbSummary = {
   records: number;
   files: number;
   entities: { label: string; count: number; file: string }[];
+  counts: { label: string; count: number }[];
 };
 
 const QB_ERROR_MESSAGES: Record<string, string> = {
@@ -122,16 +123,18 @@ function toCsv(rows: Record<string, unknown>[]): string {
 }
 
 function summarizeQuickBooks(data: QuickBooksPayload): QbSummary {
-  const entities = QB_RECORD_DEFINITIONS.map((definition) => ({
+  const counts = QB_RECORD_DEFINITIONS.map((definition) => ({
     label: definition.label,
     count: qbEntities(data[definition.key], definition.entity).length,
     file: definition.file,
-  })).filter((item) => item.count > 0);
+  }));
+  const entities = counts.filter((item) => item.count > 0);
 
   return {
-    records: entities.reduce((sum, item) => sum + item.count, 0),
+    records: counts.reduce((sum, item) => sum + item.count, 0),
     files: entities.length,
     entities,
+    counts: counts.map(({ label, count }) => ({ label, count })),
   };
 }
 
@@ -671,10 +674,13 @@ export default function WorkspaceClient({
       setQbSummary(summarizeQuickBooks(payload.data));
 
       if (payload.errors && Object.keys(payload.errors).length) {
+        const labels = Object.keys(payload.errors).map(
+          (key) =>
+            QB_RECORD_DEFINITIONS.find((definition) => definition.key === key)
+              ?.label ?? key,
+        );
         setQbDataWarning(
-          `Some record types could not be loaded: ${Object.keys(
-            payload.errors,
-          ).join(", ")}.`,
+          `Some record types could not be loaded: ${labels.join(", ")}.`,
         );
       }
 
@@ -1087,7 +1093,7 @@ export default function WorkspaceClient({
           prompt: runPrompt,
           files: files.map(({ name, content }) => ({ name, content })),
           environment: runtime,
-          quickBooksCounts: qbSummary?.entities.map(
+          quickBooksCounts: qbSummary?.counts.map(
             (entity) => `${entity.label}: ${entity.count}`,
           ),
         }),
@@ -1554,7 +1560,7 @@ export default function WorkspaceClient({
                   </div>
                 </div>
                 <div className="grid gap-4 xl:grid-cols-[0.9fr_1.1fr]">
-                  <div className="bai-card p-5 max-h-[430px] overflow-y-auto pr-2">
+                  <div className="bai-card p-5 max-h-[630px] overflow-y-auto pr-2">
                     <div className="flex items-center justify-between">
                       <div>
                         <p className="label">Task files</p>

@@ -41,7 +41,7 @@ The callback URL is derived from the origin the browser is using, so localhost a
 
 Register **every** redirect URI you use in the Intuit developer dashboard, exactly matching scheme, host, port, and path. Development/sandbox keys allow `http://localhost`; production and tunnel URLs require HTTPS. A random free ngrok URL changes on restart, so use a static tunnel domain if you need a stable callback.
 
-The OAuth scope is `com.intuit.quickbooks.accounting`. **Import** fetches only four record types — customers (`quickbooks-customers.csv`), vendors (`quickbooks-vendors.csv`), employees (`quickbooks-employees.csv`) and invoices (`quickbooks-invoices.csv`). No other entities, company info or reports are imported. Per-entity failures are reported without discarding the rest of the import.
+The OAuth scope is `com.intuit.quickbooks.accounting`. **Import** fetches customers (`quickbooks-customers.csv`), vendors (`quickbooks-vendors.csv`), employees (`quickbooks-employees.csv`), invoices (`quickbooks-invoices.csv`), bills (`quickbooks-bills.csv`) and sales orders (`quickbooks-sales-orders.csv`, when the connected company exposes that entity). No other entities, company info or reports are imported. Per-entity failures are reported without discarding the rest of the import.
 
 ### QuickBooks write-back
 

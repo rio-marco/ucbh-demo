@@ -59,8 +59,7 @@ export const MCP_TOOL_DEFINITIONS: Record<
   },
   qb_query: {
     title: "Query QuickBooks",
-    description:
-      "Run a read-only SELECT query against the connected QuickBooks company. Allowed entities: Customer, Vendor, Employee, Invoice. Never writes data.",
+    description: `Run a read-only SELECT query against the connected QuickBooks company. Allowed entities: ${ENTITY_NAMES.join(", ")}. Never writes data.`,
     schema: queryQuickBooksSchema,
   },
   qb_find_records: {

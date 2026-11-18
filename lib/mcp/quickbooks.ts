@@ -11,6 +11,7 @@ import {
   markConnectionDisconnected,
   releaseRefreshLock,
   saveQuickBooksConnection,
+  setPrimaryConnection,
   updateConnectionTokens,
   type QuickBooksConnectionDoc,
 } from "@/lib/mcp/db";
@@ -55,11 +56,14 @@ export async function importExistingQuickBooksConnection(
     return null;
   }
   const existing = await getConnection(sessionHash, tokens.realm_id);
-  if (existing?.is_connected) return existing;
+  if (existing?.is_connected) {
+    await setPrimaryConnection(sessionHash, tokens.realm_id);
+    return existing;
+  }
   const createdMs = new Date(tokens.created_at).getTime();
   if (!Number.isFinite(createdMs)) return null;
 
-  return saveQuickBooksConnection({
+  const connection = await saveQuickBooksConnection({
     sessionHash,
     realmId: tokens.realm_id,
     companyName: "QuickBooks company",
@@ -71,6 +75,8 @@ export async function importExistingQuickBooksConnection(
       createdMs + tokens.x_refresh_token_expires_in * 1000,
     ),
   });
+  await setPrimaryConnection(sessionHash, tokens.realm_id);
+  return connection;
 }
 
 export function accessTokenExpiring(connection: QuickBooksConnectionDoc): boolean {

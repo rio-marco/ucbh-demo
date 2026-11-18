@@ -11,6 +11,8 @@ export const QB_RECORD_DEFINITIONS: QuickBooksRecordDefinition[] = [
   { entity: "Vendor", key: "vendors", label: "Vendors", file: "quickbooks-vendors.csv", canUpdate: true },
   { entity: "Employee", key: "employees", label: "Employees", file: "quickbooks-employees.csv", canUpdate: true },
   { entity: "Invoice", key: "invoices", label: "Invoices", file: "quickbooks-invoices.csv", canUpdate: true },
+  { entity: "Bill", key: "bills", label: "Bills", file: "quickbooks-bills.csv", canUpdate: false },
+  { entity: "SalesOrder", key: "salesOrders", label: "Sales Orders", file: "quickbooks-sales-orders.csv", canUpdate: false },
 ];
 
 export const QB_UPDATABLE_ENTITIES = new Set(
