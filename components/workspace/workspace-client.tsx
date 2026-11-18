@@ -643,7 +643,9 @@ export default function WorkspaceClient({
       return connected;
     } catch {
       setMcpConnected(false);
-      setMcpError("The MCP Connector is unavailable. Please try again shortly.");
+      setMcpError(
+        "The MCP Connector is unavailable. Please try again shortly.",
+      );
       return false;
     }
   };
@@ -773,7 +775,7 @@ export default function WorkspaceClient({
       }
       if (data.connected) {
         setMcpConnected(true);
-        setMcpNotice("MCP connected successfully. Ask Claude in the task prompt.");
+        setMcpNotice("MCP connected successfully.");
         await refreshMcpStatus();
         return;
       }
@@ -846,7 +848,7 @@ export default function WorkspaceClient({
       const mcpReady = mcp ? await refreshMcpStatus() : false;
       if (cancelled) return;
       if (mcpReady) {
-        setMcpNotice("MCP connected successfully. Ask Claude in the task prompt.");
+        setMcpNotice("MCP connected successfully.");
       }
       if (qb) stripQbParams();
       if (mcp) {
@@ -1766,7 +1768,7 @@ export default function WorkspaceClient({
                       </div>
                     </div>
 
-                    <div className="mt-3 rounded-xl border border-primary/20 bg-primary/[0.03] p-3.5">
+                    <div className="mt-3">
                       <div className="flex items-start gap-3">
                         <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary">
                           <Bot className="h-4 w-4" />
@@ -1774,8 +1776,8 @@ export default function WorkspaceClient({
                         <div className="min-w-0">
                           <p className="text-xs font-semibold">MCP Connector</p>
                           <p className="mt-1 text-[10.5px] leading-relaxed text-muted-foreground">
-                            Chat with AI about your QuickBooks company
-                            through our secure MCP server.
+                            Chat with AI about your QuickBooks company through
+                            our secure MCP server.
                           </p>
                         </div>
                       </div>
@@ -1783,25 +1785,36 @@ export default function WorkspaceClient({
                         type="button"
                         onClick={() => void connectMcp()}
                         disabled={mcpConnecting || mcpConnected}
-                        className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg border border-primary/20 bg-white px-4 py-2 text-[11px] font-semibold text-primary transition hover:border-primary/40 hover:bg-primary/[0.04] disabled:cursor-not-allowed disabled:opacity-60"
+                        className={`mt-3 flex w-full items-center justify-center gap-2.5 rounded-xl border px-4 py-3 text-xs font-semibold transition-all duration-200 disabled:cursor-not-allowed disabled:opacity-70 ${
+                          mcpConnected
+                            ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                            : "border-ink/15 bg-white text-ink hover:border-[#2CA01C]/40 hover:bg-[#2CA01C]/[0.04] hover:shadow-sm"
+                        }`}
                       >
+                        <Bot className="h-5 w-5 text-primary" />
                         {mcpConnecting ? (
-                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          <>
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                            Connecting to QuickBooks…
+                          </>
+                        ) : mcpConnected ? (
+                          <>
+                            MCP Connected
+                            <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                          </>
                         ) : (
-                          <Sparkles className="h-3.5 w-3.5" />
+                          <>
+                            Connect MCP
+                            <ArrowRight className="h-4 w-4" />
+                          </>
                         )}
-                        {mcpConnecting
-                          ? "Connecting to QuickBooks…"
-                          : mcpConnected
-                            ? "MCP Connected"
-                            : "Connect MCP"}
-                        {!mcpConnected && <ArrowRight className="h-3.5 w-3.5" />}
                       </button>
-                      {mcpNotice && (
-                        <p className="mt-2 flex items-start gap-1.5 text-[10px] leading-relaxed text-emerald-700">
-                          <CheckCircle2 className="mt-0.5 h-3 w-3 shrink-0" />
-                          {mcpNotice}
-                        </p>
+                      {mcpConnected && (
+                        <div className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50/70 p-3">
+                          <p className="text-[10.5px] font-semibold text-emerald-800">
+                            {mcpNotice || "MCP connected successfully."}
+                          </p>
+                        </div>
                       )}
                       {mcpError && (
                         <p className="mt-2 flex items-start gap-1.5 text-[10px] leading-relaxed text-red-700">
