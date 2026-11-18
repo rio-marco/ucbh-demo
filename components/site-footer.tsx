@@ -1,5 +1,8 @@
 import Link from "next/link";
 import { ShieldCheck } from "lucide-react";
+import ComingSoonBadge, {
+  COMING_SOON_SURFACE,
+} from "@/components/coming-soon-badge";
 import Logo from "@/components/logo";
 import { AGENTS } from "@/data/agents";
 
@@ -45,16 +48,14 @@ export default function SiteFooter() {
                     {comingSoon ? (
                       <div
                         aria-disabled="true"
-                        className="inline-flex cursor-not-allowed items-center gap-2 rounded-md border border-blue-300/30 bg-gradient-to-r from-blue-700 to-blue-950 px-2 py-1 text-white"
+                        className={`inline-flex cursor-not-allowed items-center gap-2 rounded-md px-2 py-1 ${COMING_SOON_SURFACE}`}
                       >
                         <span
                           className="h-1.5 w-1.5 rounded-full opacity-70"
                           style={{ background: agent.accent }}
                         />
                         {agent.name}
-                        <span className="rounded-full bg-white px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-blue-800">
-                          Coming Soon
-                        </span>
+                        <ComingSoonBadge compact />
                       </div>
                     ) : (
                       <Link

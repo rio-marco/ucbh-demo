@@ -38,7 +38,7 @@ export default async function AgentDetails({
 }) {
   const { agentId } = await params;
   const agent = AGENTS.find((item) => item.id === agentId);
-  if (!agent) notFound();
+  if (!agent || agent.comingSoon) notFound();
 
   const stats = await getAgentStats(agent.id);
   const totalTokens = Math.max(stats.totalTokens, 0);

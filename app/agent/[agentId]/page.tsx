@@ -17,7 +17,7 @@ export default async function WorkspacePage({
   const query = await searchParams;
   const agent = AGENTS.find((item) => item.id === agentId);
 
-  if (!agent) notFound();
+  if (!agent || agent.comingSoon) notFound();
 
   const sessionId = `UCBH-${randomUUID().slice(0, 5).toUpperCase()}`;
   const [sessions, savedRun] = await Promise.all([

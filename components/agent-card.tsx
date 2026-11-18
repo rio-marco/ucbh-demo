@@ -1,5 +1,8 @@
 import Link from "next/link";
 import { ArrowUpRight, Check } from "lucide-react";
+import ComingSoonBadge, {
+  COMING_SOON_SURFACE,
+} from "@/components/coming-soon-badge";
 import type { Agent } from "@/lib/types";
 
 export default function AgentCard({ agent }: { agent: Agent }) {
@@ -25,7 +28,7 @@ export default function AgentCard({ agent }: { agent: Agent }) {
               : "chip"
           }
         >
-          Agent AI
+          {comingSoon ? "Upcoming" : "Agent AI"}
         </span>
       </div>
       <h3 className="mt-4 font-display text-[24px] font-bold leading-none">
@@ -81,13 +84,12 @@ export default function AgentCard({ agent }: { agent: Agent }) {
     return (
       <div
         aria-disabled="true"
-        className="relative flex cursor-not-allowed flex-col overflow-hidden rounded-[1.45rem] border border-blue-300/30 bg-gradient-to-br from-blue-700 to-blue-950 p-5 text-white shadow-md"
+        className={`relative flex cursor-not-allowed flex-col overflow-hidden rounded-[1.45rem] p-5 shadow-md ${COMING_SOON_SURFACE}`}
       >
+        <div className="pointer-events-none absolute -right-12 -top-12 h-36 w-36 rounded-full bg-white/10 blur-2xl" />
         <div className="flex flex-col opacity-40">{content}</div>
-        <div className="pointer-events-none absolute inset-0 grid place-items-center bg-blue-950/20">
-          <span className="rounded-full bg-white px-5 py-2 font-display text-[14px] font-bold uppercase tracking-[0.16em] text-blue-800 shadow-xl ring-4 ring-white/20">
-            Coming Soon
-          </span>
+        <div className="pointer-events-none absolute inset-0 grid place-items-center bg-blue-950/25">
+          <ComingSoonBadge />
         </div>
       </div>
     );
