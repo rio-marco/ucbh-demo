@@ -38,23 +38,42 @@ export default function SiteFooter() {
           <nav aria-label="Agents">
             <p className="font-display text-xs font-bold">Agents</p>
             <ul className="mt-4 space-y-2.5 text-[12.5px] text-muted-foreground">
-              {AGENTS.map((agent) => (
-                <li key={agent.id}>
-                  <Link
-                    href={`/agents/${agent.id}`}
-                    className="inline-flex items-center gap-2 hover:text-ink"
-                  >
-                    <span
-                      className="h-1.5 w-1.5 rounded-full"
-                      style={{ background: agent.accent }}
-                    />
-                    {agent.name}
-                    <span className="text-[10px] text-muted-foreground/70">
-                      · {agent.role}
-                    </span>
-                  </Link>
-                </li>
-              ))}
+              {AGENTS.map((agent) => {
+                const comingSoon = Boolean(agent.comingSoon);
+                return (
+                  <li key={agent.id}>
+                    {comingSoon ? (
+                      <div
+                        aria-disabled="true"
+                        className="inline-flex cursor-not-allowed items-center gap-2 rounded-md border border-blue-300/30 bg-gradient-to-r from-blue-700 to-blue-950 px-2 py-1 text-white"
+                      >
+                        <span
+                          className="h-1.5 w-1.5 rounded-full opacity-70"
+                          style={{ background: agent.accent }}
+                        />
+                        {agent.name}
+                        <span className="rounded-full bg-white px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-blue-800">
+                          Coming Soon
+                        </span>
+                      </div>
+                    ) : (
+                      <Link
+                        href={`/agents/${agent.id}`}
+                        className="inline-flex items-center gap-2 hover:text-ink"
+                      >
+                        <span
+                          className="h-1.5 w-1.5 rounded-full"
+                          style={{ background: agent.accent }}
+                        />
+                        {agent.name}
+                        <span className="text-[10px] text-muted-foreground/70">
+                          · {agent.role}
+                        </span>
+                      </Link>
+                    )}
+                  </li>
+                );
+              })}
             </ul>
           </nav>
         </div>
@@ -63,7 +82,7 @@ export default function SiteFooter() {
           <p>© {year} UCBH. All rights reserved.</p>
           <p className="inline-flex items-center gap-1.5 leading-relaxed">
             <ShieldCheck className="h-3.5 w-3.5 text-primary" />
-            Runs are isolated · run history is managed in the workspace.
+            Runs are isolated.
           </p>
         </div>
       </div>

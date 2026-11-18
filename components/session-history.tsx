@@ -101,8 +101,7 @@ export function CleanupDialog({
             Data cleanup
           </DialogTitle>
           <DialogDescription>
-            Remove this run’s Agent runtime history from the server. Run history
-            and its review status are kept.
+            Remove this run’s Agent runtime history from the server. Its review status is kept.
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-2">
@@ -175,13 +174,13 @@ export default function SessionHistory({
         <span className="grid h-9 w-9 place-items-center rounded-xl bg-primary/10 text-primary">
           <History className="h-4 w-4" />
         </span>
-        <div>
+        {/* <div>
           <p className="text-sm font-semibold">Run history</p>
           <p className="mt-0.5 text-[10.5px] text-muted-foreground">
             {sessions.length} run{sessions.length === 1 ? "" : "s"} · review and
             inspect previous results
           </p>
-        </div>
+        </div> */}
       </div>
       {sessions.length === 0 ? (
         <div className="px-5 py-10 text-center">
@@ -306,10 +305,10 @@ export default function SessionHistory({
             <DialogTitle className="font-display text-lg">
               Delete run?
             </DialogTitle>
-            <DialogDescription>
+            {/* <DialogDescription>
               This removes {deleteTarget?.id} from run history. This cannot be
               undone.
-            </DialogDescription>
+            </DialogDescription> */}
           </DialogHeader>
           <DialogFooter>
             <Button

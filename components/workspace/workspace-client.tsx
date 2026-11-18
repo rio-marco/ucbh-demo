@@ -2164,8 +2164,8 @@ export default function WorkspaceClient({
                 <p className="mt-2 max-w-xl text-xs leading-relaxed text-muted-foreground">
                   {sessions.find((session) => session.id === activeSessionId)
                     ?.status === "rejected"
-                    ? "This result was rejected. Agent runtime data has been cleaned and the review status is recorded in run history."
-                    : "This result was accepted. Agent runtime data has been cleaned and the review status is recorded in run history."}
+                    ? "This result was rejected. Agent runtime data has been cleaned."
+                    : "This result was accepted. Agent runtime data has been cleaned."}
                 </p>
                 <div className="mt-5 rounded-xl border border-ink/8 bg-white p-4">
                   <p className="label mb-3">Agent result</p>
@@ -2216,7 +2216,7 @@ export default function WorkspaceClient({
                   )}
                   <p className="text-[10.5px] text-muted-foreground">
                     {cleanupDone
-                      ? "Agent runtime data cleaned. Your run history is still available below."
+                      ? "Agent runtime data cleaned."
                       : "Cleanup did not finish. Retry to remove Agent runtime data."}
                   </p>
                 </div>

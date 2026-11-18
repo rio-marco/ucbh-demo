@@ -322,7 +322,7 @@ export default async function RunDetailsPage({
               href={`/agent/${session.agentId}`}
               className="text-[11px] text-muted-foreground hover:text-ink"
             >
-              Workspace / Run history / Details
+              Workspace / Details
             </Link>
             <p className="label mt-4">
               {session.agentName} ·{" "}

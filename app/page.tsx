@@ -26,8 +26,7 @@ export default function HomePage() {
               </h2>
             </div>
             <p className="max-w-sm text-right text-[11px] leading-relaxed text-muted-foreground">
-              Dashboard → agent details → open workspace. Run history is
-              available inside the workspace only.
+              Dashboard → agent details → open workspace.
             </p>
           </div>
           <div className="grid gap-3 md:grid-cols-3">

@@ -25,6 +25,7 @@ export const AGENTS: Agent[] = [
       "Review invoice data for duplicates, missing fields, and unusual variances.",
     capabilities: ["Duplicate review", "Variance analysis", "Audit summary"],
     prompts: [""],
+    comingSoon: true,
   },
   {
     id: "relay",
@@ -35,5 +36,6 @@ export const AGENTS: Agent[] = [
       "Organize support data, surface urgent cases, and prepare a triage summary.",
     capabilities: ["Queue analysis", "Priority review", "Triage summary"],
     prompts: [""],
+    comingSoon: true,
   },
 ];

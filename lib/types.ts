@@ -6,6 +6,7 @@ export type Agent = {
   tagline: string;
   capabilities: string[];
   prompts: string[];
+  comingSoon?: boolean;
 };
 
 export type SessionStatus =
