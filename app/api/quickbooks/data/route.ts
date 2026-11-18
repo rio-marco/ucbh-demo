@@ -1,7 +1,6 @@
 import { loadTokens, qbApiRequest } from "@/lib/quickbooks";
 import {
   QB_RECORD_DEFINITIONS,
-  QB_REPORT_DEFINITIONS,
   type QuickBooksRecordDefinition,
 } from "@/lib/quickbooks-entities";
 
@@ -17,14 +16,12 @@ const errorText = (error: unknown) =>
 /**
  * GET /api/quickbooks/data
  *
- * Fetch company data from QuickBooks. Queries every record type and report
- * listed in lib/quickbooks-entities.ts and returns a combined payload.
+ * Fetches the supported record types from QuickBooks and returns a combined
+ * payload. The record types are defined in lib/quickbooks-entities.ts.
  *
  * Query params:
- *   ?type=all (default) — fetch everything
- *   ?type=company — company info
- *   ?type=reports — financial reports
- *   ?type=invoices|customers|vendors|items|... — one record type
+ *   ?type=all (default) — fetch customers, vendors, employees and invoices
+ *   ?type=customers|vendors|employees|invoices — one record type
  */
 export async function GET(request: Request) {
   const tokens = await loadTokens();
@@ -39,7 +36,7 @@ export async function GET(request: Request) {
   const type = url.searchParams.get("type") || "all";
 
   const selectedRecords: QuickBooksRecordDefinition[] =
-    type === "all" || type === "company" || type === "reports"
+    type === "all"
       ? QB_RECORD_DEFINITIONS
       : QB_RECORD_DEFINITIONS.filter(
           (definition) =>
@@ -47,12 +44,7 @@ export async function GET(request: Request) {
             definition.entity.toLowerCase() === type.toLowerCase(),
         );
 
-  if (
-    type !== "all" &&
-    type !== "company" &&
-    type !== "reports" &&
-    selectedRecords.length === 0
-  ) {
+  if (type !== "all" && selectedRecords.length === 0) {
     return Response.json(
       { error: `Unknown QuickBooks record type: ${type}` },
       { status: 400 },
@@ -64,63 +56,26 @@ export async function GET(request: Request) {
     const errors: Record<string, string> = {};
     let currentTokens = tokens;
 
-    const query = async (endpoint: string, key: string) => {
-      const { data, tokens: updatedTokens } = await qbApiRequest<Record<
-        string,
-        unknown
-      >>(endpoint, currentTokens);
-      currentTokens = updatedTokens;
-      result[key] = data;
-    };
-
-    const fetchAllRecords = async (definition: QuickBooksRecordDefinition) => {
-      const rows: unknown[] = [];
-      for (let page = 0; page < MAX_PAGES; page += 1) {
-        const startPosition = page * PAGE_SIZE + 1;
-        const statement = `SELECT * FROM ${definition.entity} STARTPOSITION ${startPosition} MAXRESULTS ${PAGE_SIZE}`;
-        const { data, tokens: updatedTokens } = await qbApiRequest<{
-          QueryResponse?: Record<string, unknown[]>;
-        }>(`query?query=${encodeURIComponent(statement)}`, currentTokens);
-        currentTokens = updatedTokens;
-        const pageRows = data.QueryResponse?.[definition.entity];
-        if (!Array.isArray(pageRows)) break;
-        rows.push(...pageRows);
-        if (pageRows.length < PAGE_SIZE) break;
-      }
-      result[definition.key] = {
-        QueryResponse: { [definition.entity]: rows },
-      };
-    };
-
-    if (type === "all" || type === "company") {
+    for (const definition of selectedRecords) {
       try {
-        await query(
-          `companyinfo/${currentTokens.realm_id}`,
-          "companyInfo",
-        );
+        const rows: unknown[] = [];
+        for (let page = 0; page < MAX_PAGES; page += 1) {
+          const startPosition = page * PAGE_SIZE + 1;
+          const statement = `SELECT * FROM ${definition.entity} STARTPOSITION ${startPosition} MAXRESULTS ${PAGE_SIZE}`;
+          const { data, tokens: updatedTokens } = await qbApiRequest<{
+            QueryResponse?: Record<string, unknown[]>;
+          }>(`query?query=${encodeURIComponent(statement)}`, currentTokens);
+          currentTokens = updatedTokens;
+          const pageRows = data.QueryResponse?.[definition.entity];
+          if (!Array.isArray(pageRows)) break;
+          rows.push(...pageRows);
+          if (pageRows.length < PAGE_SIZE) break;
+        }
+        result[definition.key] = {
+          QueryResponse: { [definition.entity]: rows },
+        };
       } catch (error) {
-        errors.companyInfo = errorText(error);
-      }
-    }
-
-    const shouldFetchRecords = type !== "company" && type !== "reports";
-    if (shouldFetchRecords) {
-      for (const definition of selectedRecords) {
-        try {
-          await fetchAllRecords(definition);
-        } catch (error) {
-          errors[definition.key] = errorText(error);
-        }
-      }
-    }
-
-    if (type === "all" || type === "reports") {
-      for (const definition of QB_REPORT_DEFINITIONS) {
-        try {
-          await query(definition.endpoint, definition.key);
-        } catch (error) {
-          errors[definition.key] = errorText(error);
-        }
+        errors[definition.key] = errorText(error);
       }
     }
 

@@ -6,68 +6,11 @@ export type QuickBooksRecordDefinition = {
   canUpdate: boolean;
 };
 
-export type QuickBooksReportDefinition = {
-  key: string;
-  label: string;
-  endpoint: string;
-  file: string;
-};
-
 export const QB_RECORD_DEFINITIONS: QuickBooksRecordDefinition[] = [
   { entity: "Customer", key: "customers", label: "Customers", file: "quickbooks-customers.csv", canUpdate: true },
   { entity: "Vendor", key: "vendors", label: "Vendors", file: "quickbooks-vendors.csv", canUpdate: true },
   { entity: "Employee", key: "employees", label: "Employees", file: "quickbooks-employees.csv", canUpdate: true },
-  { entity: "Item", key: "items", label: "Items", file: "quickbooks-items.csv", canUpdate: true },
   { entity: "Invoice", key: "invoices", label: "Invoices", file: "quickbooks-invoices.csv", canUpdate: true },
-  { entity: "Estimate", key: "estimates", label: "Estimates", file: "quickbooks-estimates.csv", canUpdate: true },
-  { entity: "SalesReceipt", key: "salesReceipts", label: "Sales receipts", file: "quickbooks-sales-receipts.csv", canUpdate: true },
-  { entity: "CreditMemo", key: "creditMemos", label: "Credit memos", file: "quickbooks-credit-memos.csv", canUpdate: true },
-  { entity: "RefundReceipt", key: "refundReceipts", label: "Refund receipts", file: "quickbooks-refund-receipts.csv", canUpdate: true },
-  { entity: "Payment", key: "payments", label: "Payments", file: "quickbooks-payments.csv", canUpdate: true },
-  { entity: "Bill", key: "bills", label: "Bills", file: "quickbooks-bills.csv", canUpdate: true },
-  { entity: "BillPayment", key: "billPayments", label: "Bill payments", file: "quickbooks-bill-payments.csv", canUpdate: true },
-  { entity: "VendorCredit", key: "vendorCredits", label: "Vendor credits", file: "quickbooks-vendor-credits.csv", canUpdate: true },
-  { entity: "Purchase", key: "purchases", label: "Purchases", file: "quickbooks-purchases.csv", canUpdate: true },
-  { entity: "PurchaseOrder", key: "purchaseOrders", label: "Purchase orders", file: "quickbooks-purchase-orders.csv", canUpdate: true },
-  { entity: "JournalEntry", key: "journalEntries", label: "Journal entries", file: "quickbooks-journal-entries.csv", canUpdate: true },
-  { entity: "Transfer", key: "transfers", label: "Transfers", file: "quickbooks-transfers.csv", canUpdate: true },
-  { entity: "Deposit", key: "deposits", label: "Deposits", file: "quickbooks-deposits.csv", canUpdate: true },
-  { entity: "TimeActivity", key: "timeActivities", label: "Time activities", file: "quickbooks-time-activities.csv", canUpdate: true },
-  { entity: "Account", key: "accounts", label: "Accounts", file: "quickbooks-accounts.csv", canUpdate: true },
-  { entity: "Class", key: "classes", label: "Classes", file: "quickbooks-classes.csv", canUpdate: true },
-  { entity: "Department", key: "departments", label: "Departments", file: "quickbooks-departments.csv", canUpdate: true },
-  { entity: "Term", key: "terms", label: "Terms", file: "quickbooks-terms.csv", canUpdate: true },
-  { entity: "PaymentMethod", key: "paymentMethods", label: "Payment methods", file: "quickbooks-payment-methods.csv", canUpdate: true },
-  { entity: "TaxCode", key: "taxCodes", label: "Tax codes", file: "quickbooks-tax-codes.csv", canUpdate: true },
-  { entity: "TaxRate", key: "taxRates", label: "Tax rates", file: "quickbooks-tax-rates.csv", canUpdate: true },
-  { entity: "TaxAgency", key: "taxAgencies", label: "Tax agencies", file: "quickbooks-tax-agencies.csv", canUpdate: true },
-];
-
-export const QB_REPORT_DEFINITIONS: QuickBooksReportDefinition[] = [
-  {
-    key: "profitAndLoss",
-    label: "Profit and Loss",
-    endpoint: "reports/ProfitAndLoss?date_macro=This Fiscal Year-to-date",
-    file: "quickbooks-profit-and-loss.json",
-  },
-  {
-    key: "balanceSheet",
-    label: "Balance Sheet",
-    endpoint: "reports/BalanceSheet?date_macro=This Fiscal Year-to-date",
-    file: "quickbooks-balance-sheet.json",
-  },
-  {
-    key: "cashFlow",
-    label: "Cash Flow",
-    endpoint: "reports/CashFlow?date_macro=This Fiscal Year-to-date",
-    file: "quickbooks-cash-flow.json",
-  },
-  {
-    key: "trialBalance",
-    label: "Trial Balance",
-    endpoint: "reports/TrialBalance?date_macro=This Fiscal Year-to-date",
-    file: "quickbooks-trial-balance.json",
-  },
 ];
 
 export const QB_UPDATABLE_ENTITIES = new Set(

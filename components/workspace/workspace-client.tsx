@@ -48,7 +48,6 @@ import type {
 import {
   parseQuickBooksUpdates,
   QB_RECORD_DEFINITIONS,
-  QB_REPORT_DEFINITIONS,
   QUICKBOOKS_UPDATES_FILE,
   type QuickBooksUpdateOperation,
 } from "@/lib/quickbooks-entities";
@@ -76,7 +75,6 @@ type QbSummary = {
   records: number;
   files: number;
   entities: { label: string; count: number; file: string }[];
-  reports: { label: string; file: string }[];
 };
 
 const QB_ERROR_MESSAGES: Record<string, string> = {
@@ -129,23 +127,10 @@ function summarizeQuickBooks(data: QuickBooksPayload): QbSummary {
     file: definition.file,
   })).filter((item) => item.count > 0);
 
-  const reports = QB_REPORT_DEFINITIONS.filter((definition) =>
-    Boolean(data[definition.key]),
-  ).map((definition) => ({
-    label: definition.label,
-    file: definition.file,
-  }));
-
-  const files =
-    entities.length +
-    reports.length +
-    (data.companyInfo?.CompanyInfo ? 1 : 0);
-
   return {
     records: entities.reduce((sum, item) => sum + item.count, 0),
-    files,
+    files: entities.length,
     entities,
-    reports,
   };
 }
 
@@ -161,29 +146,11 @@ function quickBooksToFiles(data: QuickBooksPayload): Upload[] {
     files.push({ name, content, size: encodeSize(content) });
   };
 
-  const addJson = (name: string, value: unknown) => {
-    if (!value) return;
-    const content = JSON.stringify(value, null, 2);
-    if (!content) return;
-    files.push({ name, content, size: encodeSize(content) });
-  };
-
   for (const definition of QB_RECORD_DEFINITIONS) {
     addCsv(
       definition.file,
       qbEntities(data[definition.key], definition.entity),
     );
-  }
-
-  const companyInfo = data.companyInfo?.CompanyInfo;
-  if (companyInfo && typeof companyInfo === "object") {
-    addCsv("quickbooks-company-info.csv", [
-      companyInfo as Record<string, unknown>,
-    ]);
-  }
-
-  for (const definition of QB_REPORT_DEFINITIONS) {
-    addJson(definition.file, data[definition.key]);
   }
 
   return files;
@@ -1638,16 +1605,13 @@ export default function WorkspaceClient({
                             ? "Reading your QuickBooks data…"
                             : qbImported
                               ? "QuickBooks records are part of this task."
-                              : "Import all QuickBooks record types and reports into this task."}
+                              : "Import customers, vendors, employees and invoices into this task."}
                         </p>
                         {qbSummary && (
                           <div className="mt-1.5 space-y-1">
                             <p className="font-mono text-[9.5px] leading-relaxed text-emerald-800/80">
                               {qbSummary.records} records · {qbSummary.files}{" "}
                               files
-                              {qbSummary.reports.length
-                                ? ` · ${qbSummary.reports.length} reports`
-                                : ""}
                             </p>
                             {qbSummary.entities.length > 0 && (
                               <p className="text-[9.5px] leading-relaxed text-emerald-800/70">
@@ -2377,9 +2341,6 @@ export default function WorkspaceClient({
                     <div className="mt-2 space-y-2">
                       <p className="rounded-lg bg-white px-2 py-1.5 text-[10.5px] font-semibold">
                         {qbSummary.records} records · {qbSummary.files} files
-                        {qbSummary.reports.length
-                          ? ` · ${qbSummary.reports.length} reports`
-                          : ""}
                       </p>
                       <dl className="grid max-h-56 grid-cols-2 gap-1.5 overflow-y-auto text-[10.5px]">
                         {qbSummary.entities.map((entity) => (
@@ -2393,23 +2354,12 @@ export default function WorkspaceClient({
                             <dd className="font-semibold">{entity.count}</dd>
                           </div>
                         ))}
-                        {qbSummary.reports.map((report) => (
-                          <div
-                            key={report.file}
-                            className="flex justify-between rounded-lg bg-white px-2 py-1.5"
-                          >
-                            <dt className="text-muted-foreground">
-                              {report.label}
-                            </dt>
-                            <dd className="font-semibold">✓</dd>
-                          </div>
-                        ))}
                       </dl>
                     </div>
                   ) : (
                     <p className="mt-2 text-[10.5px] leading-relaxed text-muted-foreground">
-                      Load all available QuickBooks record types and reports to
-                      use them in this task.
+                      Load customers, vendors, employees and invoices from
+                      QuickBooks to use them in this task.
                     </p>
                   )}
                   {qbDataWarning && (
