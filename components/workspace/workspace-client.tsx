@@ -1497,7 +1497,7 @@ export default function WorkspaceClient({
                             <span className="font-mono text-[9px] text-muted-foreground">
                               {(file.size / 1024).toFixed(0)} KB
                             </span>
-                            <button
+                            {/* <button
                               type="button"
                               aria-label={`Remove ${file.name}`}
                               onClick={() =>
@@ -1507,7 +1507,7 @@ export default function WorkspaceClient({
                               }
                             >
                               <X className="h-3.5 w-3.5 text-muted-foreground" />
-                            </button>
+                            </button> */}
                           </li>
                         ))}
                       </ul>
