@@ -36,6 +36,7 @@ type ExecuteBody = {
   sessionId?: string;
   prompt?: string;
   files?: { name: string; content: string }[];
+  quickBooksCounts?: string[];
 };
 
 const json = (error: string, status: number) =>
@@ -90,6 +91,15 @@ export async function POST(request: Request) {
   if (safeFiles.some((file) => file === null))
     return json("File names must be unique and valid.", 400);
 
+  const quickBooksCounts = Array.isArray(body?.quickBooksCounts)
+    ? body.quickBooksCounts
+        .filter(
+          (item): item is string =>
+            typeof item === "string" && item.length <= 120,
+        )
+        .slice(0, 20)
+    : [];
+
   const sessionKey = (body?.sessionId || randomUUID())
     .replace(/[^a-zA-Z0-9_-]/g, "")
     .slice(0, 64);
@@ -131,6 +141,7 @@ export async function POST(request: Request) {
           prompt,
           workspace,
           inputNames: names,
+          quickBooksCounts,
           signal: abort.signal,
           onMessage: (text) => send("message", { text }),
           onActivity: (tool, status) =>

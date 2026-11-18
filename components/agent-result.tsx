@@ -53,6 +53,38 @@ function parseResult(source: string): Block[] {
   return blocks;
 }
 
+function visibleBlocks(blocks: Block[]): Block[] {
+  const headingIndex = (predicate: (text: string) => boolean) =>
+    blocks.findIndex(
+      (block) => block.type === "heading" && predicate(block.text.toLowerCase()),
+    );
+  const summaryIndex = headingIndex((text) => text.includes("summary"));
+  const firstHeadingIndex = headingIndex(() => true);
+  const start = summaryIndex >= 0 ? summaryIndex : Math.max(firstHeadingIndex, 0);
+  const hidden = (text: string) => {
+    const normalized = text.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+    return (
+      normalized.includes("key findings") ||
+      normalized.includes("deliverables created")
+    );
+  };
+
+  const visible: Block[] = [];
+  let skip = false;
+  for (let index = start; index < blocks.length; index += 1) {
+    const block = blocks[index];
+    if (block.type === "heading") {
+      if (hidden(block.text)) {
+        skip = true;
+        continue;
+      }
+      skip = false;
+    }
+    if (!skip) visible.push(block);
+  }
+  return visible;
+}
+
 function inline(text: string): ReactNode[] {
   return text.split(/(`[^`]+`|\*\*[^*]+\*\*|\*[^*]+\*)/g).map((part, index) => {
     if (part.startsWith("`") && part.endsWith("`")) return <code key={index} className="rounded bg-ink/5 px-1 py-0.5 font-mono text-[0.9em]">{part.slice(1, -1)}</code>;
@@ -63,7 +95,7 @@ function inline(text: string): ReactNode[] {
 }
 
 export default function AgentResult({ content, emptyText = "No text result was recorded for this run." }: { content: string; emptyText?: string }) {
-  const blocks = parseResult(content);
+  const blocks = visibleBlocks(parseResult(content));
   if (!blocks.length) return <p className="text-sm text-muted-foreground">{emptyText}</p>;
   return <article className="space-y-4 text-[13px] leading-7 text-ink/80">
     {blocks.map((block, index) => {

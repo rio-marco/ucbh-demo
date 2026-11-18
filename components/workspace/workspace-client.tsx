@@ -1087,6 +1087,9 @@ export default function WorkspaceClient({
           prompt: runPrompt,
           files: files.map(({ name, content }) => ({ name, content })),
           environment: runtime,
+          quickBooksCounts: qbSummary?.entities.map(
+            (entity) => `${entity.label}: ${entity.count}`,
+          ),
         }),
         signal: abort.signal,
       });
