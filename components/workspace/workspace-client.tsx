@@ -679,9 +679,9 @@ export default function WorkspaceClient({
             QB_RECORD_DEFINITIONS.find((definition) => definition.key === key)
               ?.label ?? key,
         );
-        setQbDataWarning(
-          `Some record types could not be loaded: ${labels.join(", ")}.`,
-        );
+        // setQbDataWarning(
+        //   `Some record types could not be loaded: ${labels.join(", ")}.`,
+        // );
       }
 
       const generated = quickBooksToFiles(payload.data);
@@ -1648,7 +1648,6 @@ export default function WorkspaceClient({
                           : "border-ink/15 bg-white text-ink hover:border-[#2CA01C]/40 hover:bg-[#2CA01C]/[0.04] hover:shadow-sm"
                       }`}
                     >
-                      {/* QuickBooks Logo SVG */}
                       <svg
                         width="20"
                         height="20"
