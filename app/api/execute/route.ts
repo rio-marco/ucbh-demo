@@ -72,14 +72,14 @@ export async function POST(request: Request) {
   const body = (await request.json().catch(() => null)) as ExecuteBody | null;
   const agent = AGENTS.find((item) => item.id === body?.agentId);
   const prompt = body?.prompt?.trim();
-  const files = body?.files;
+  const files = Array.isArray(body?.files) ? body.files : [];
   if (!agent || !prompt || prompt.length > 20_000)
     return json(
       "A valid agent and prompt (up to 20,000 characters) are required.",
       400,
     );
-  if (!Array.isArray(files) || files.length < 1 || files.length > 40)
-    return json("Upload between 1 and 40 CSV or JSON files.", 400);
+  if (files.length > 40)
+    return json("Upload up to 40 CSV or JSON files.", 400);
   if (
     files.some(
       (file) =>
@@ -198,9 +198,12 @@ export async function POST(request: Request) {
       } catch (error) {
         if (!abort.signal.aborted) {
           console.error("Claude agent execution failed", error);
+          const detail =
+            error instanceof Error ? error.message.trim().slice(0, 1_000) : "";
           send("error", {
-            message:
-              "Agent execution failed. Check the server Claude credentials and model, then see the server logs for details.",
+            message: detail
+              ? `Agent execution failed: ${detail}`
+              : "Agent execution failed. Check the server Claude credentials and model, then see the server logs for details.",
           });
         }
       } finally {

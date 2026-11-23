@@ -101,6 +101,8 @@ MCP_SIGNING_SECRET=<random string of at least 32 characters>
 
 `CLAUDE_OAUTH_SCOPES` must match the scopes allowed by the Claude OAuth app. If Claude returns `The requested scope is not one this client may be issued`, remove any scope the app has not enabled.
 
+When `CLAUDE_BILLING_FALLBACK=true`, a linked request refused with `user_profile_not_billable` is retried with `CLAUDE_AUTH_TOKEN` and billed to the server-token organization. Keep this disabled when linked customers must always pay for their own runs.
+
 `/api/claude/auth` creates PKCE state and a pushed authorization request, then redirects the browser to `auth.claude.com/oauth/authorize`. `/api/claude/callback` exchanges the code and encrypts the connection access/refresh tokens into the browser session. `/api/claude/jwks` serves the public key used by the client assertion. Claude env values are read from `.env*` on each request, so edits apply without restarting the process.
 
 No second Intuit app registration is needed. MCP Connector reuses the existing QuickBooks login and the already-configured `QB_REDIRECT_URI` / `/api/quickbooks/callback` route. If QuickBooks is not connected yet, clicking the connector starts that same login flow and returns to the connector with the company connection ready.

@@ -9,6 +9,8 @@ import {
 
 const CLAUDE_MESSAGES_URL = "https://api.anthropic.com/v1/messages";
 const CLAUDE_VERSION = "2023-06-01";
+const CLAUDE_OAUTH_VERSION = "2026-10-21";
+const CLAUDE_BILLING_BETA = "user-profiles-billing-2026-10-01";
 const DEFAULT_MODEL = "claude-haiku-4-5-20251001";
 const MAX_ITERATIONS = 24;
 const MAX_TOOL_RESULT_CHARS = 200_000;
@@ -18,6 +20,8 @@ export type ClaudeCredentials = {
   apiKey?: string;
   authToken?: string;
   model?: string;
+  userProfileId?: string;
+  billingMode?: "connection" | "operator";
 };
 
 export function getClaudeConfig(
@@ -234,35 +238,61 @@ export async function callClaude(
   tools?: Record<string, unknown>[],
   credentials?: ClaudeCredentials | null,
 ): Promise<ClaudeResponse> {
-  const { apiKey, authToken } = getClaudeConfig(credentials);
+  let { apiKey, authToken } = getClaudeConfig(credentials);
   if (!apiKey && !authToken) {
     throw new Error(
       "Something went wrong please try again later or contact the administrator",
     );
   }
 
-  const headers: Record<string, string> = {
-    "content-type": "application/json",
-    "anthropic-version": CLAUDE_VERSION,
+  let billsOperatorProfile =
+    credentials?.billingMode === "operator" && Boolean(credentials?.userProfileId);
+  const buildHeaders = () => {
+    const headers: Record<string, string> = {
+      "content-type": "application/json",
+      "anthropic-version": authToken ? CLAUDE_OAUTH_VERSION : CLAUDE_VERSION,
+    };
+    if (authToken) {
+      headers.authorization = `Bearer ${authToken}`;
+      if (billsOperatorProfile) {
+        headers["anthropic-user-profile-id"] = credentials!.userProfileId!;
+        headers["anthropic-beta"] = CLAUDE_BILLING_BETA;
+      }
+    } else {
+      headers["x-api-key"] = apiKey;
+    }
+    return headers;
   };
-  if (authToken) headers.authorization = `Bearer ${authToken}`;
-  else headers["x-api-key"] = apiKey;
 
+  const fallbackToken = getRuntimeEnv("CLAUDE_AUTH_TOKEN");
+  const fallbackEnabled =
+    getRuntimeEnv("CLAUDE_BILLING_FALLBACK").toLowerCase() === "true" &&
+    Boolean(credentials?.authToken) &&
+    Boolean(fallbackToken) &&
+    fallbackToken !== credentials?.authToken;
+  let usedFallback = false;
   let lastFailure = "";
 
   for (const model of getModelCandidates(credentials)) {
     for (let attempt = 0; attempt < 2; attempt += 1) {
       if (signal.aborted) throw new Error("Execution cancelled.");
+      const body: Record<string, unknown> = {
+        model,
+        max_tokens: 8192,
+        system,
+        messages,
+        tools: tools ?? TOOLS,
+      };
+      if (billsOperatorProfile) {
+        body.billing_policy = {
+          type: "billing_policy",
+          bill_to: "user_profile",
+        };
+      }
       const response = await fetch(CLAUDE_MESSAGES_URL, {
         method: "POST",
-        headers,
-        body: JSON.stringify({
-          model,
-          max_tokens: 8192,
-          system,
-          messages,
-          tools: tools ?? TOOLS,
-        }),
+        headers: buildHeaders(),
+        body: JSON.stringify(body),
         signal,
       });
       if (response.ok) {
@@ -272,8 +302,26 @@ export async function callClaude(
       const details = await response.text().catch(() => "");
       lastFailure = `${model} (${response.status}): ${details.slice(0, 300)}`;
 
+      if (
+        response.status === 403 &&
+        !usedFallback &&
+        fallbackEnabled &&
+        details.includes("user_profile_not_billable")
+      ) {
+        usedFallback = true;
+        ({ apiKey, authToken } = getClaudeConfig({
+          model: credentials?.model,
+          authToken: fallbackToken,
+        }));
+        billsOperatorProfile = false;
+        attempt = -1;
+        continue;
+      }
+
       if (response.status === 401 || response.status === 403) {
-        throw new Error("Claude authentication failed.");
+        throw new Error(
+          `Claude authentication failed (${response.status}): ${details.slice(0, 500)}`,
+        );
       }
 
       // Model not available for this key, or rate-limited for this model.
@@ -325,7 +373,8 @@ export async function runClaudeAgent({
   signal: AbortSignal;
   credentials?: ClaudeCredentials | null;
 } & ClaudeRunEvents): Promise<{ input_tokens: number; output_tokens: number }> {
-  const hasQuickBooksInputs = Array.from(inputNames).some((name) =>
+  const inputList = Array.from(inputNames);
+  const hasQuickBooksInputs = inputList.some((name) =>
     name.startsWith("quickbooks-"),
   );
 
@@ -374,9 +423,13 @@ export async function runClaudeAgent({
       content: [
         `Task: ${prompt}`,
         "",
-        `Input files: ${Array.from(inputNames).join(", ")}`,
+        inputList.length
+          ? `Input files: ${inputList.join(", ")}`
+          : "No local input files are attached.",
         "",
-        "Analyze the inputs and produce the requested deliverables as files in the workspace.",
+        inputList.length
+          ? "Analyze the inputs and produce the requested deliverables as files in the workspace."
+          : "Work from the task description and available tools. Do not invent file contents or record counts, and produce the requested deliverables as files in the workspace.",
       ].join("\n"),
     },
   ];

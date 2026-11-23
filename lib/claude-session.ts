@@ -11,11 +11,11 @@ export async function getClaudeSessionCredentials(
 ): Promise<ClaudeSessionCredentials | null> {
   let tokens = await getClaudeOAuthTokens(sessionHash);
   if (!tokens) return null;
+  const config = getClaudeOAuthConfig();
 
   const expiresAt = tokens.accessTokenExpiresAt?.getTime() ?? Number.POSITIVE_INFINITY;
   if (expiresAt <= Date.now() + 60_000) {
     if (!tokens.refreshToken) return null;
-    const config = getClaudeOAuthConfig();
     if (!config) return null;
     try {
       const refreshed = await refreshClaudeToken({
@@ -51,5 +51,6 @@ export async function getClaudeSessionCredentials(
     authToken: tokens.accessToken,
     model: getClaudeConfig().model,
     connectionId: tokens.connectionId,
+    billingMode: "connection",
   };
 }
