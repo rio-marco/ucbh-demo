@@ -13,7 +13,9 @@ export const queryQuickBooksSchema = z.object({
     .string()
     .min(1)
     .max(2000)
-    .describe("A read-only QuickBooks SELECT query."),
+    .describe(
+      "A read-only QuickBooks SELECT query. Use SELECT COUNT(*) FROM <Entity> for totals and SELECT * FROM <Entity> for records.",
+    ),
   max_results: z.number().int().min(1).max(1000).optional(),
 });
 
@@ -59,7 +61,7 @@ export const MCP_TOOL_DEFINITIONS: Record<
   },
   qb_query: {
     title: "Query QuickBooks",
-    description: `Run a read-only SELECT query against the connected QuickBooks company. Allowed entities: ${ENTITY_NAMES.join(", ")}. Never writes data.`,
+    description: `Run a read-only SELECT query against the connected QuickBooks company. Use SELECT COUNT(*) FROM <Entity> for accurate totals; use SELECT * FROM <Entity> for records. Allowed entities: ${ENTITY_NAMES.join(", ")}. Never writes data.`,
     schema: queryQuickBooksSchema,
   },
   qb_find_records: {
@@ -94,10 +96,11 @@ function canonicalEntity(value: string): string | null {
   return found ?? null;
 }
 
-export function validateReadOnlyQuery(
-  input: string,
-  maxResults: number,
-): { query: string; entity: string } {
+export function validateReadOnlyQuery(input: string): {
+  query: string;
+  entity: string;
+  countOnly: boolean;
+} {
   const query = input.trim().replace(/;+\s*$/, "");
   if (!/^select\s+/i.test(query)) {
     throw new Error("Only read-only SELECT queries are allowed.");
@@ -113,10 +116,18 @@ export function validateReadOnlyQuery(
   if (!entity) {
     throw new Error(`Supported entities are: ${ENTITY_NAMES.join(", ")}.`);
   }
-  return {
-    query: `${query.replace(/\bfrom\s+([a-z_]+)/i, `FROM ${entity}`)} STARTPOSITION 1 MAXRESULTS ${maxResults}`,
-    entity,
-  };
+  const countOnly = /^select\s+count\s*\(\s*(\*|[a-z_]+)\s*\)\s+from\s+/i.test(
+    query,
+  );
+  const normalized = query
+    .replace(
+      /^select\s+count\s*\(\s*(\*|[a-z_]+)\s*\)\s+from\s+/i,
+      "SELECT * FROM ",
+    )
+    .replace(/\s+STARTPOSITION\s+\d+/i, "")
+    .replace(/\s+MAXRESULTS\s+\d+/i, "")
+    .replace(/\bfrom\s+([a-z_]+)/i, `FROM ${entity}`);
+  return { query: normalized, entity, countOnly };
 }
 
 export function buildFindQuery(

@@ -25,6 +25,9 @@ import {
 } from "@/lib/mcp/tools";
 import { parseQuickBooksUpdates } from "@/lib/quickbooks-entities";
 
+const QUERY_PAGE_SIZE = 1000;
+const MAX_QUERY_PAGES = 20;
+
 function textResult(value: Record<string, unknown>): CallToolResult {
   return { content: [{ type: "text", text: JSON.stringify(value) }] };
 }
@@ -107,19 +110,41 @@ export function createMcpServer(sessionHash: string): McpServer {
           if (name === "qb_query") {
             const active = await connection();
             const maxResults = Math.min(1000, Number(input.max_results) || 100);
-            const validated = validateReadOnlyQuery(String(input.query), maxResults);
-            const data = await qbGet<{
-              QueryResponse?: Record<string, unknown[]>;
-            }>(
-              sessionHash,
-              active,
-              `query?query=${encodeURIComponent(validated.query)}`,
-            );
-            const records = data.QueryResponse?.[validated.entity] ?? [];
+            const validated = validateReadOnlyQuery(String(input.query));
+            const records: Record<string, unknown>[] = [];
+            let totalCount = 0;
+            let startPosition = 1;
+
+            for (let page = 0; page < MAX_QUERY_PAGES; page += 1) {
+              const pagedQuery = `${validated.query} STARTPOSITION ${startPosition} MAXRESULTS ${QUERY_PAGE_SIZE}`;
+              const data = await qbGet<{
+                QueryResponse?: Record<string, unknown[]>;
+              }>(
+                sessionHash,
+                active,
+                `query?query=${encodeURIComponent(pagedQuery)}`,
+              );
+              const pageRecords = data.QueryResponse?.[validated.entity];
+              if (!Array.isArray(pageRecords)) break;
+
+              totalCount += pageRecords.length;
+              if (!validated.countOnly && records.length < maxResults) {
+                records.push(
+                  ...pageRecords
+                    .slice(0, maxResults - records.length)
+                    .map((record) => record as Record<string, unknown>),
+                );
+              }
+              if (pageRecords.length < QUERY_PAGE_SIZE) break;
+              startPosition += pageRecords.length;
+            }
+
             return {
               entity: validated.entity,
-              count: records.length,
-              records: records.slice(0, maxResults),
+              count: totalCount,
+              returned: records.length,
+              countOnly: validated.countOnly,
+              records,
             };
           }
 
