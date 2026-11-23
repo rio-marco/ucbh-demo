@@ -28,6 +28,8 @@ export type McpNonceDoc = {
   expires_at: Date;
 };
 
+export type ConnectionOrigin = "oauth" | "import";
+
 export type QuickBooksConnectionDoc = {
   id: string;
   session_id: string;
@@ -38,6 +40,7 @@ export type QuickBooksConnectionDoc = {
   access_token_expires_at: Date;
   refresh_token_expires_at: Date;
   environment: "sandbox" | "production";
+  origin: ConnectionOrigin;
   is_connected: boolean;
   is_primary: boolean;
   refresh_lock_id: string | null;
@@ -323,6 +326,7 @@ export type ConnectionInput = {
   refreshToken: EncryptedCredential;
   accessTokenExpiresAt: Date;
   refreshTokenExpiresAt: Date;
+  origin?: ConnectionOrigin;
 };
 
 export async function saveQuickBooksConnection(
@@ -345,6 +349,7 @@ export async function saveQuickBooksConnection(
         access_token_expires_at: input.accessTokenExpiresAt,
         refresh_token_expires_at: input.refreshTokenExpiresAt,
         environment: input.environment,
+        origin: input.origin ?? "import",
         is_connected: true,
         is_primary: false,
         refresh_lock_id: null,
@@ -356,6 +361,7 @@ export async function saveQuickBooksConnection(
     } else {
       record.company_name = input.companyName;
       record.environment = input.environment;
+      record.origin = input.origin ?? record.origin ?? "import";
       record.access_token = input.accessToken;
       record.refresh_token = input.refreshToken;
       record.access_token_expires_at = input.accessTokenExpiresAt;
@@ -386,7 +392,8 @@ export async function getPrimaryConnection(
         (item) =>
           item.session_id === sessionHash &&
           item.is_connected &&
-          item.is_primary,
+          item.is_primary &&
+          item.origin === "oauth",
       ) ?? null,
   );
 }

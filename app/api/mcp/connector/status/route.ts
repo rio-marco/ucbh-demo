@@ -6,10 +6,7 @@ import {
   listConnections,
 } from "@/lib/mcp/db";
 import { mcpErrorResponse, mcpJson } from "@/lib/mcp/http";
-import {
-  getCompanyName,
-  importExistingQuickBooksConnection,
-} from "@/lib/mcp/quickbooks";
+import { getCompanyName } from "@/lib/mcp/quickbooks";
 import { resolveBrowserSession } from "@/lib/mcp/session";
 
 export const runtime = "nodejs";
@@ -19,7 +16,6 @@ export async function GET(request: Request) {
   try {
     const session = await resolveBrowserSession(request);
     assertMcpSecretsConfigured();
-    await importExistingQuickBooksConnection(session.hash);
     const connection = await getPrimaryConnection(session.hash);
     const connections = await listConnections(session.hash);
     const companyName = connection?.is_connected
@@ -31,7 +27,9 @@ export async function GET(request: Request) {
         connected: Boolean(connection?.is_connected),
         companyName,
         environment: connection?.is_connected ? connection.environment : null,
-        connectionCount: connections.filter((item) => item.is_connected).length,
+        connectionCount: connections.filter(
+          (item) => item.is_connected && item.origin === "oauth",
+        ).length,
       },
       200,
       session,

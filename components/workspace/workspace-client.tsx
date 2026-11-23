@@ -642,7 +642,11 @@ export default function WorkspaceClient({
       };
       const connected = Boolean(data.connected);
       setMcpConnected(connected);
-      if (!response.ok && data.error) setMcpError(data.error);
+      if (connected) {
+        setMcpError("");
+      } else if (!response.ok && data.error) {
+        setMcpError(data.error);
+      }
       return connected;
     } catch {
       setMcpConnected(false);
@@ -851,7 +855,7 @@ export default function WorkspaceClient({
       if (connected && qb === "connected" && !mcp) {
         setQbDialogOpen(true);
       }
-      const mcpReady = mcp ? await refreshMcpStatus() : false;
+      const mcpReady = await refreshMcpStatus();
       if (cancelled) return;
       if (mcpReady) {
         setMcpNotice("MCP connected successfully.");
@@ -1561,7 +1565,7 @@ export default function WorkspaceClient({
                 </div>
                 <div className="grid gap-4 xl:grid-cols-[0.9fr_1.1fr]">
                   <div className="bai-card p-5 max-h-[630px] overflow-y-auto pr-2">
-                    <div className="flex items-center justify-between">
+                    {/* <div className="flex items-center justify-between">
                       <div>
                         <p className="label">Task files</p>
                         <p className="mt-1 text-[11px] text-muted-foreground">
@@ -1603,7 +1607,7 @@ export default function WorkspaceClient({
                             <span className="font-mono text-[9px] text-muted-foreground">
                               {(file.size / 1024).toFixed(0)} KB
                             </span>
-                            {/* <button
+                            <button
                               type="button"
                               aria-label={`Remove ${file.name}`}
                               onClick={() =>
@@ -1613,13 +1617,12 @@ export default function WorkspaceClient({
                               }
                             >
                               <X className="h-3.5 w-3.5 text-muted-foreground" />
-                            </button> */}
+                            </button>
                           </li>
                         ))}
                       </ul>
                     )}
 
-                    {/* Divider */}
                     <div className="relative mt-5 mb-1">
                       <div className="absolute inset-0 flex items-center">
                         <div className="w-full border-t border-ink/10" />
@@ -1631,7 +1634,6 @@ export default function WorkspaceClient({
                       </div>
                     </div>
 
-                    {/* Connect with QuickBooks Button */}
                     <button
                       type="button"
                       onClick={() => {
@@ -1764,7 +1766,6 @@ export default function WorkspaceClient({
                       </div>
                     )}
 
-                    {/* Divider */}
                     <div className="relative mt-5 mb-1">
                       <div className="absolute inset-0 flex items-center">
                         <div className="w-full border-t border-ink/10" />
@@ -1774,7 +1775,7 @@ export default function WorkspaceClient({
                           or
                         </span>
                       </div>
-                    </div>
+                    </div> */}
 
                     <div className="mt-3">
                       <div className="flex items-start gap-3">
@@ -1822,6 +1823,21 @@ export default function WorkspaceClient({
                           <p className="text-[10.5px] font-semibold text-emerald-800">
                             {mcpNotice || "MCP connected successfully."}
                           </p>
+                        </div>
+                      )}
+
+                      {mcpConnected && (
+                        <div className="mt-3">
+                          <div className="flex flex-wrap gap-2">
+                            <button
+                              type="button"
+                              onClick={() => void disconnectQuickBooks()}
+                              disabled={qbDataLoading}
+                              className="rounded-lg border border-emerald-300 bg-white px-2.5 py-1.5 text-[10px] font-semibold text-emerald-800 transition hover:bg-emerald-50 disabled:opacity-60"
+                            >
+                              Disconnect
+                            </button>
+                          </div>
                         </div>
                       )}
                       {mcpError && (

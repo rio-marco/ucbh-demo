@@ -76,6 +76,7 @@ const STATE_FILE = path.join(DATA_DIR, "quickbooks-state.json");
 export type QBStateRecord = {
   state: string;
   returnTo: string;
+  sessionHash?: string;
   createdAt: string;
 };
 
@@ -110,7 +111,10 @@ export function sanitizeReturnTo(value: string | null | undefined): string {
 }
 
 /** Generate a random state string and persist it for validation. */
-export async function generateState(returnTo = "/"): Promise<string> {
+export async function generateState(
+  returnTo = "/",
+  sessionHash?: string,
+): Promise<string> {
   const state = randomBytes(24).toString("hex");
 
   await ensureDataDir();
@@ -118,6 +122,7 @@ export async function generateState(returnTo = "/"): Promise<string> {
   const record: QBStateRecord = {
     state,
     returnTo: sanitizeReturnTo(returnTo),
+    sessionHash,
     createdAt: new Date().toISOString(),
   };
 

@@ -13,6 +13,7 @@ import {
   saveQuickBooksConnection,
   setPrimaryConnection,
   updateConnectionTokens,
+  type ConnectionOrigin,
   type QuickBooksConnectionDoc,
 } from "@/lib/mcp/db";
 import {
@@ -50,13 +51,14 @@ function apiBase(connection: QuickBooksConnectionDoc): string {
 
 export async function importExistingQuickBooksConnection(
   sessionHash: string,
+  origin: ConnectionOrigin = "import",
 ): Promise<QuickBooksConnectionDoc | null> {
   const tokens = await loadTokens();
   if (!tokens?.access_token || !tokens?.refresh_token || !tokens?.realm_id) {
     return null;
   }
   const existing = await getConnection(sessionHash, tokens.realm_id);
-  if (existing?.is_connected) {
+  if (existing?.is_connected && existing.origin === origin) {
     await setPrimaryConnection(sessionHash, tokens.realm_id);
     return existing;
   }
@@ -74,6 +76,7 @@ export async function importExistingQuickBooksConnection(
     refreshTokenExpiresAt: new Date(
       createdMs + tokens.x_refresh_token_expires_in * 1000,
     ),
+    origin,
   });
   await setPrimaryConnection(sessionHash, tokens.realm_id);
   return connection;

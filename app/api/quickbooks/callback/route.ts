@@ -6,6 +6,7 @@ import {
   saveTokens,
   sanitizeReturnTo,
 } from "@/lib/quickbooks";
+import { importExistingQuickBooksConnection } from "@/lib/mcp/quickbooks";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -79,6 +80,10 @@ export async function GET(request: Request) {
       getRedirectUri(request),
     );
     await saveTokens(tokens);
+
+    if (stateRecord.sessionHash) {
+      await importExistingQuickBooksConnection(stateRecord.sessionHash, "oauth");
+    }
 
     // Redirect back to the page the user started the connection from.
     return Response.redirect(
