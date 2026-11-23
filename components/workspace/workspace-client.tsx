@@ -40,6 +40,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import type { AgentPermission } from "@/lib/agent-permissions";
 import type {
   Agent,
   SessionFile,
@@ -100,7 +101,7 @@ const claudeErrorMessage = (reason: string | null) =>
 
 type TaskTab = "mcp" | "upload";
 type TaskView = "setup" | "prompt";
-type PermissionKey = "read" | "create" | "update" | "delete";
+type PermissionKey = AgentPermission;
 
 const PERMISSION_OPTIONS: {
   key: PermissionKey;
@@ -128,6 +129,72 @@ const PERMISSION_OPTIONS: {
     detail: "Void transactions and remove records when the agent proposes it.",
   },
 ];
+
+type PendingQuickBooksOperation = {
+  confirmationId: string;
+  confirmationSecret: string;
+  entity: string;
+  recordId: string;
+  fields: Record<string, unknown>;
+};
+
+function PendingQuickBooksOperations({
+  operations,
+  onConfirm,
+  onReject,
+}: {
+  operations: PendingQuickBooksOperation[];
+  onConfirm: (operation: PendingQuickBooksOperation) => void;
+  onReject: (operation: PendingQuickBooksOperation) => void;
+}) {
+  if (!operations.length) return null;
+  return (
+    <div className="bai-card p-5 md:p-6">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="flex items-start gap-2">
+          <ShieldCheck className="mt-0.5 h-4 w-4 text-primary" />
+          <div>
+            <p className="label">QuickBooks write-back</p>
+            <h2 className="mt-1 font-display text-lg font-bold">
+              Review proposed changes
+            </h2>
+          </div>
+        </div>
+        <span className="chip">
+          {operations.length} pending
+        </span>
+      </div>
+      <div className="mt-4 space-y-3">
+        {operations.map((operation) => (
+          <div
+            key={operation.confirmationId}
+            className="rounded-xl border border-amber-200 bg-amber-50/60 p-4"
+          >
+            <p className="text-xs font-semibold">
+              {operation.entity}
+              {operation.recordId ? ` #${operation.recordId}` : ""}
+            </p>
+            <pre className="mt-2 max-h-40 overflow-auto rounded-lg bg-white p-3 font-mono text-[10px] leading-relaxed text-ink/80">
+              {JSON.stringify(operation.fields, null, 2)}
+            </pre>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <Button size="sm" onClick={() => onConfirm(operation)}>
+                Confirm write-back
+              </Button>
+              <Button
+                size="sm"
+                variant="line"
+                onClick={() => onReject(operation)}
+              >
+                Reject
+              </Button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 const createSessionId = () => {
   const webCrypto = globalThis.crypto;
@@ -473,6 +540,9 @@ export default function WorkspaceClient({
     "read",
   ]);
   const [permissionGranted, setPermissionGranted] = useState(false);
+  const [pendingOperations, setPendingOperations] = useState<
+    PendingQuickBooksOperation[]
+  >([]);
   const abortRef = useRef<AbortController | null>(null);
   const traceRef = useRef<HTMLDivElement | null>(null);
   const inputEstimate =
@@ -785,7 +855,34 @@ export default function WorkspaceClient({
     );
   };
 
-  const grantPermission = () => {
+  const persistPermissions = async (scopes: PermissionKey[]) => {
+    const response = await fetch("/api/agent/permissions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ scopes }),
+    });
+    const data = (await response.json().catch(() => ({}))) as {
+      error?: string;
+      scopes?: PermissionKey[];
+    };
+    if (!response.ok) {
+      throw new Error(
+        data.error || "Could not save the QuickBooks permissions.",
+      );
+    }
+    return data.scopes ?? scopes;
+  };
+
+  const clearPermissions = async () => {
+    setPermissionGranted(false);
+    setPendingOperations([]);
+    window.localStorage.removeItem("ucbh-qb-permission");
+    await fetch("/api/agent/permissions", { method: "DELETE" }).catch(
+      () => undefined,
+    );
+  };
+
+  const grantPermission = async () => {
     if (!claudeConnected || !mcpConnected) {
       setPermissionOpen(false);
       return;
@@ -795,18 +892,68 @@ export default function WorkspaceClient({
       return;
     }
     setError("");
-    setPermissionGranted(true);
-    setPermissionOpen(false);
-    window.localStorage.setItem(
-      "ucbh-qb-permission",
-      JSON.stringify(permissionScopes),
-    );
+    try {
+      const saved = await persistPermissions(permissionScopes);
+      setPermissionScopes(saved);
+      setPermissionGranted(true);
+      setPermissionOpen(false);
+      window.localStorage.setItem(
+        "ucbh-qb-permission",
+        JSON.stringify(saved),
+      );
+    } catch (grantError) {
+      setError(
+        grantError instanceof Error
+          ? grantError.message
+          : "Could not save the QuickBooks permissions.",
+      );
+    }
   };
 
   const revokePermission = () => {
-    setPermissionGranted(false);
+    void clearPermissions();
     setPermissionOpen(true);
-    window.localStorage.removeItem("ucbh-qb-permission");
+  };
+
+  const resolvePendingOperation = async (
+    operation: PendingQuickBooksOperation,
+    confirm: boolean,
+  ) => {
+    setError("");
+    try {
+      const response = await fetch("/api/mcp/confirm", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          confirmationId: operation.confirmationId,
+          confirmationSecret: operation.confirmationSecret,
+          confirm,
+        }),
+      });
+      const data = (await response.json().catch(() => ({}))) as {
+        error?: string;
+      };
+      if (!response.ok) {
+        throw new Error(
+          data.error || "Could not resolve the QuickBooks write-back.",
+        );
+      }
+      setPendingOperations((items) =>
+        items.filter(
+          (item) => item.confirmationId !== operation.confirmationId,
+        ),
+      );
+      setActivities((items) => [
+        ...items,
+        `QuickBooks write-back ${confirm ? "confirmed" : "rejected"}`,
+      ]);
+    } catch (confirmError) {
+      setError(
+        confirmError instanceof Error
+          ? confirmError.message
+          : "Could not resolve the QuickBooks write-back.",
+      );
+    }
   };
 
   const disconnectQuickBooks = async () => {
@@ -825,8 +972,7 @@ export default function WorkspaceClient({
       setMcpConnected(false);
       setMcpNotice("");
       setMcpError("");
-      setPermissionGranted(false);
-      window.localStorage.removeItem("ucbh-qb-permission");
+      await clearPermissions();
       setQbDialogOpen(false);
     } catch {
       setQbError("Could not disconnect QuickBooks. Please try again.");
@@ -842,14 +988,41 @@ export default function WorkspaceClient({
       setMcpError("");
       setMcpNotice("");
       setPermissionScopes(["read"]);
-      setPermissionGranted(false);
       setPermissionOpen(false);
-      window.localStorage.removeItem("ucbh-qb-permission");
+      await clearPermissions();
       setError("");
     } catch {
       setError("Could not disconnect all accounts. Please try again.");
     } finally {
       setDisconnectingAll(false);
+    }
+  };
+
+  const loadServerPermissions = async () => {
+    try {
+      const response = await fetch("/api/agent/permissions", {
+        cache: "no-store",
+      });
+      if (!response.ok) return;
+      const data = (await response.json()) as { scopes?: unknown };
+      const scopes = Array.isArray(data.scopes)
+        ? data.scopes.filter((item): item is PermissionKey =>
+            PERMISSION_OPTIONS.some((option) => option.key === item),
+          )
+        : [];
+      if (!scopes.length) {
+        window.localStorage.removeItem("ucbh-qb-permission");
+        setPermissionGranted(false);
+        return;
+      }
+      setPermissionScopes(scopes);
+      setPermissionGranted(true);
+      window.localStorage.setItem(
+        "ucbh-qb-permission",
+        JSON.stringify(scopes),
+      );
+    } catch {
+      return;
     }
   };
 
@@ -894,6 +1067,8 @@ export default function WorkspaceClient({
         setMcpNotice("MCP connected successfully.");
       }
       await refreshClaudeStatus();
+      if (cancelled) return;
+      await loadServerPermissions();
       if (cancelled) return;
       if (claude === "error") {
         setClaudeError(claudeErrorMessage(claudeReason));
@@ -1021,8 +1196,8 @@ export default function WorkspaceClient({
     setUsage(null);
     setError("");
     setCleanupDone(false);
-    setPermissionGranted(false);
-    window.localStorage.removeItem("ucbh-qb-permission");
+    void clearPermissions();
+    setPendingOperations([]);
     setRunProgress(0);
     setActiveSessionId(createSessionId());
   };
@@ -1092,6 +1267,7 @@ export default function WorkspaceClient({
     setCollecting(false);
     setOutputs([]);
     setUsage(null);
+    setPendingOperations([]);
     setCleanupDone(false);
     setRunProgress(4);
     const runFiles = files.map(({ name, size }) => ({ name, size }));
@@ -1150,6 +1326,28 @@ export default function WorkspaceClient({
             runMessages.push(message);
             setMessages((items) => [...items, message]);
             runTrace.push("Agent returned a result message");
+          }
+          if (event.type === "pending_operation") {
+            const data = event.data as Partial<PendingQuickBooksOperation>;
+            if (
+              typeof data.confirmationId === "string" &&
+              typeof data.confirmationSecret === "string"
+            ) {
+              const operation: PendingQuickBooksOperation = {
+                confirmationId: data.confirmationId,
+                confirmationSecret: data.confirmationSecret,
+                entity: String(data.entity || "QuickBooks record"),
+                recordId: String(data.recordId || ""),
+                fields:
+                  data.fields && typeof data.fields === "object"
+                    ? data.fields
+                    : {},
+              };
+              setPendingOperations((items) => [...items, operation]);
+              const trace = "QuickBooks update proposed for review";
+              runTrace.push(trace);
+              setActivities((items) => [...items, trace]);
+            }
           }
           if (event.type === "activity") {
             const tool =
@@ -2205,8 +2403,9 @@ export default function WorkspaceClient({
             )}
 
             {stage === "running" && (
-              <div className="space-y-4">
-                <div className="grid gap-4 xl:grid-cols-[285px_minmax(0,1fr)]">
+              <>
+                <div className="space-y-4">
+                  <div className="grid gap-4 xl:grid-cols-[285px_minmax(0,1fr)]">
                   <div className="bai-card flex flex-col p-5">
                     <div className="flex items-center gap-2.5">
                       <span className="grid h-8 w-8 place-items-center rounded-lg bg-primary/10 text-primary">
@@ -2386,6 +2585,17 @@ export default function WorkspaceClient({
                   </div>
                 </div>
               </div>
+
+                <PendingQuickBooksOperations
+                  operations={pendingOperations}
+                  onConfirm={(operation) =>
+                    void resolvePendingOperation(operation, true)
+                  }
+                  onReject={(operation) =>
+                    void resolvePendingOperation(operation, false)
+                  }
+                />
+              </>
             )}
 
             {stage === "review" && (
@@ -2405,6 +2615,17 @@ export default function WorkspaceClient({
                   </div>
                   <div className="mt-4 rounded-xl border border-ink/8 bg-white p-4">
                     <AgentResult content={messages.join("\n\n")} />
+                  </div>
+                  <div className="mt-4">
+                    <PendingQuickBooksOperations
+                      operations={pendingOperations}
+                      onConfirm={(operation) =>
+                        void resolvePendingOperation(operation, true)
+                      }
+                      onReject={(operation) =>
+                        void resolvePendingOperation(operation, false)
+                      }
+                    />
                   </div>
                   <div className="mt-3 grid gap-3 sm:grid-cols-2">
                     <div className="rounded-xl bg-paper/80 p-3.5">
@@ -2829,7 +3050,7 @@ export default function WorkspaceClient({
             <Button variant="line" onClick={() => setPermissionOpen(false)}>
               Cancel
             </Button>
-            <Button onClick={grantPermission}>
+            <Button onClick={() => void grantPermission()}>
               <Check className="h-3.5 w-3.5" />
               Allow selected actions
             </Button>

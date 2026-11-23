@@ -2,6 +2,10 @@ import { randomBytes } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import {
+  normalizeAgentPermissions,
+  type AgentPermission,
+} from "@/lib/agent-permissions";
+import {
   decryptCredential,
   encryptCredential,
   type EncryptedCredential,
@@ -107,6 +111,14 @@ export type ClaudeStateDoc = {
   expires_at: Date;
 };
 
+export type AgentPermissionDoc = {
+  id: string;
+  session_id: string;
+  scopes: AgentPermission[];
+  created_at: Date;
+  updated_at: Date;
+};
+
 type Store = {
   sessions: BrowserSessionDoc[];
   states: OAuthStateDoc[];
@@ -116,6 +128,7 @@ type Store = {
   audit: AuditDoc[];
   claudeAuth: ClaudeAuthDoc[];
   claudeStates: ClaudeStateDoc[];
+  permissions: AgentPermissionDoc[];
 };
 
 declare global {
@@ -147,6 +160,12 @@ function prune(store: Store): void {
   store.claudeStates = store.claudeStates.filter(
     (item) => item.expires_at.getTime() > now,
   );
+  const activeSessions = new Set(
+    store.sessions.map((item) => item.session_id),
+  );
+  store.permissions = store.permissions.filter((item) =>
+    activeSessions.has(item.session_id),
+  );
   store.audit = store.audit
     .filter((item) => now - item.created_at.getTime() < 90 * 24 * 60 * 60 * 1000)
     .slice(-2000);
@@ -167,6 +186,7 @@ async function readStore(): Promise<Store> {
         audit: [],
         claudeAuth: [],
         claudeStates: [],
+        permissions: [],
       };
     }
     throw error;
@@ -237,6 +257,15 @@ async function readStore(): Promise<Store> {
       >),
       created_at: asDate(item.created_at),
       expires_at: asDate(item.expires_at),
+    })),
+    permissions: (parsed.permissions || []).map((item) => ({
+      ...(item as unknown as Omit<
+        AgentPermissionDoc,
+        "scopes" | "created_at" | "updated_at"
+      >),
+      scopes: normalizeAgentPermissions(item.scopes),
+      created_at: asDate(item.created_at),
+      updated_at: asDate(item.updated_at),
     })),
   };
   prune(store);
@@ -843,6 +872,53 @@ export async function getClaudeOAuthTokens(
 export async function clearClaudeAuth(sessionHash: string): Promise<void> {
   await withStore((store) => {
     store.claudeAuth = store.claudeAuth.filter(
+      (item) => item.session_id !== sessionHash,
+    );
+  });
+}
+
+export async function getAgentPermissions(
+  sessionHash: string,
+): Promise<AgentPermission[]> {
+  const record = await withStore(
+    (store) =>
+      store.permissions.find((item) => item.session_id === sessionHash) ?? null,
+  );
+  return record?.scopes ?? [];
+}
+
+export async function setAgentPermissions(
+  sessionHash: string,
+  scopes: AgentPermission[],
+): Promise<AgentPermission[]> {
+  return withStore((store) => {
+    const normalized = normalizeAgentPermissions(scopes);
+    const now = new Date();
+    let record = store.permissions.find(
+      (item) => item.session_id === sessionHash,
+    );
+    if (!record) {
+      record = {
+        id: newId(),
+        session_id: sessionHash,
+        scopes: normalized,
+        created_at: now,
+        updated_at: now,
+      };
+      store.permissions.push(record);
+      return record.scopes;
+    }
+    record.scopes = normalized;
+    record.updated_at = now;
+    return record.scopes;
+  });
+}
+
+export async function clearAgentPermissions(
+  sessionHash: string,
+): Promise<void> {
+  await withStore((store) => {
+    store.permissions = store.permissions.filter(
       (item) => item.session_id !== sessionHash,
     );
   });

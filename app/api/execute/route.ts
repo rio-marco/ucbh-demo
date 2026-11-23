@@ -9,11 +9,14 @@ import {
 } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import type { AgentMcpConfig } from "@/lib/agent-mcp";
 import { AGENT_TEMP_PREFIX } from "@/lib/agent-runtime";
 import { AGENTS } from "@/data/agents";
 import { getClaudeConfig, runClaudeAgent } from "@/lib/claude";
 import { getClaudeSessionCredentials } from "@/lib/claude-session";
+import { getAgentPermissions, getPrimaryConnection } from "@/lib/mcp/db";
 import { mcpErrorResponse, mcpJson } from "@/lib/mcp/http";
+import { getRequestOrigin } from "@/lib/quickbooks";
 import { resolveBrowserSession } from "@/lib/mcp/session";
 import { sessionCookieHeader } from "@/lib/mcp/security";
 
@@ -120,6 +123,17 @@ export async function POST(request: Request) {
         .slice(0, 20)
     : [];
 
+  const quickBooksConnection = await getPrimaryConnection(session.hash);
+  const agentPermissions = await getAgentPermissions(session.hash);
+  const mcp: AgentMcpConfig | null =
+    quickBooksConnection?.is_connected && agentPermissions.length
+      ? {
+          sessionHash: session.hash,
+          origin: getRequestOrigin(request),
+          permissions: agentPermissions,
+        }
+      : null;
+
   const sessionKey = (body?.sessionId || randomUUID())
     .replace(/[^a-zA-Z0-9_-]/g, "")
     .slice(0, 64);
@@ -162,8 +176,11 @@ export async function POST(request: Request) {
           workspace,
           inputNames: names,
           quickBooksCounts,
+          mcp,
           signal: abort.signal,
           onMessage: (text) => send("message", { text }),
+          onPendingOperation: (operation) =>
+            send("pending_operation", operation),
           onActivity: (tool, status) =>
             send("activity", { type: "tool", tool, status }),
           onFileChange: (filePath) =>
