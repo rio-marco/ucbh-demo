@@ -597,12 +597,16 @@ export default function WorkspaceClient({
       done: processRunning || processDone,
       active: false,
     },
-    {
-      label: "Load task files",
-      detail: `${files.length} file${files.length === 1 ? "" : "s"} staged`,
-      done: files.length > 0,
-      active: false,
-    },
+    ...(files.length > 0
+      ? [
+          {
+            label: "Load task files",
+            detail: `${files.length} file${files.length === 1 ? "" : "s"} staged`,
+            done: files.length > 0,
+            active: false,
+          },
+        ]
+      : []),
     {
       label: "Analyze prompt",
       detail: processDone
@@ -1718,7 +1722,9 @@ export default function WorkspaceClient({
                     {activeSessionId}
                   </span>
                 </div>
-                <ol className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
+                <ol
+                  className={`mt-4 grid gap-2 sm:grid-cols-2 ${pipelineSteps.length === 5 ? "xl:grid-cols-5" : "xl:grid-cols-4"}`}
+                >
                   {pipelineSteps.map((step, index) => (
                     <li
                       key={step.label}
@@ -1803,7 +1809,7 @@ export default function WorkspaceClient({
 
                 {taskView === "setup" ? (
                   <>
-                    <div className="bai-card flex flex-wrap gap-1.5 p-1.5">
+                    {/* <div className="bai-card flex flex-wrap gap-1.5 p-1.5">
                       <button
                         type="button"
                         role="tab"
@@ -1840,7 +1846,7 @@ export default function WorkspaceClient({
                           </span>
                         )}
                       </button>
-                    </div>
+                    </div> */}
 
                     {taskTab === "mcp" ? (
                       <div className="space-y-4 anim-in">
