@@ -461,6 +461,7 @@ export default function WorkspaceClient({
   const [claudeConnected, setClaudeConnected] = useState(false);
   const [claudeConnecting, setClaudeConnecting] = useState(false);
   const [disconnectingAll, setDisconnectingAll] = useState(false);
+  const [claudeLoginPending, setClaudeLoginPending] = useState(false);
   const [claudeMode, setClaudeMode] = useState<"oauth" | "demo" | null>(null);
   const [claudeError, setClaudeError] = useState("");
   const [permissionOpen, setPermissionOpen] = useState(false);
@@ -470,6 +471,8 @@ export default function WorkspaceClient({
   const [permissionGranted, setPermissionGranted] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   const traceRef = useRef<HTMLDivElement | null>(null);
+  const claudeLoginWindowRef = useRef<Window | null>(null);
+  const claudeLoginTimerRef = useRef<number | null>(null);
   const inputEstimate =
     10_000 +
     Math.ceil(
@@ -761,6 +764,25 @@ export default function WorkspaceClient({
       if (!data.authUrl) throw new Error("Claude sign-in is unavailable.");
       if (data.mode === "demo" && data.state) {
         window.localStorage.setItem("ucbh-claude-signin", data.state);
+        setClaudeLoginPending(true);
+        const loginWindow = window.open(
+          data.authUrl,
+          "ucbh-claude-login",
+          "width=1100,height=820",
+        );
+        if (loginWindow) {
+          claudeLoginWindowRef.current = loginWindow;
+          claudeLoginTimerRef.current = window.setInterval(() => {
+            if (!loginWindow.closed) return;
+            if (claudeLoginTimerRef.current !== null) {
+              window.clearInterval(claudeLoginTimerRef.current);
+              claudeLoginTimerRef.current = null;
+            }
+            claudeLoginWindowRef.current = null;
+            void confirmDemoClaudeSignIn();
+          }, 700);
+          return;
+        }
       }
       window.location.assign(data.authUrl);
     } catch (reason) {
@@ -792,6 +814,7 @@ export default function WorkspaceClient({
         return;
       }
       window.localStorage.removeItem("ucbh-claude-signin");
+      setClaudeLoginPending(false);
       await refreshClaudeStatus();
     } catch {
       setClaudeError("Could not confirm the Claude sign-in. Please try again.");
@@ -895,6 +918,9 @@ export default function WorkspaceClient({
     if (claude === "error") {
       setClaudeError(claudeErrorMessage(claudeReason));
     }
+    if (window.localStorage.getItem("ucbh-claude-signin")) {
+      setClaudeLoginPending(true);
+    }
 
     const stripParam = (key: string) => {
       const url = new URL(window.location.href);
@@ -940,6 +966,9 @@ export default function WorkspaceClient({
     return () => {
       cancelled = true;
       window.removeEventListener("focus", onFocus);
+      if (claudeLoginTimerRef.current !== null) {
+        window.clearInterval(claudeLoginTimerRef.current);
+      }
     };
     // Runs once on mount: the query strings are OAuth callback signals.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1737,30 +1766,20 @@ export default function WorkspaceClient({
                                     ? "Connecting to Claude…"
                                     : "Connect Claude CoWork"}
                               </button>
-                              {claudeConnected && (
-                                <div className="mt-2 flex items-center justify-between gap-2">
-                                  <span className="truncate font-mono text-[9px] text-emerald-700">
-                                    {claudeMode === "oauth"
-                                      ? "OAuth account"
-                                      : "Browser session"}
-                                  </span>
+                              {claudeLoginPending && !claudeConnected && (
+                                <div className="mt-2 rounded-xl border border-primary/20 bg-primary/[0.04] p-2.5">
+                                  <p className="text-[10px] leading-relaxed text-muted-foreground">
+                                    Claude login opened in a new tab. Sign in,
+                                    then close that tab to return here.
+                                  </p>
                                   <button
                                     type="button"
-                                    onClick={() => {
-                                      void fetch("/api/claude/status", {
-                                        method: "DELETE",
-                                      }).then(() => {
-                                        setClaudeConnected(false);
-                                        setClaudeMode(null);
-                                        setPermissionGranted(false);
-                                        window.localStorage.removeItem(
-                                          "ucbh-qb-permission",
-                                        );
-                                      });
-                                    }}
-                                    className="text-[9px] font-medium text-muted-foreground underline underline-offset-2 hover:text-ink"
+                                    onClick={() =>
+                                      void confirmDemoClaudeSignIn()
+                                    }
+                                    className="mt-1.5 text-[10px] font-semibold text-primary underline underline-offset-2"
                                   >
-                                    Sign out
+                                    I have signed in — continue
                                   </button>
                                 </div>
                               )}

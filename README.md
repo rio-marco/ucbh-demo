@@ -88,7 +88,7 @@ CLAUDE_CLIENT_SECRET=<your Claude OAuth client secret>
 CLAUDE_OAUTH_REDIRECT_URI=http://localhost:3000/api/claude/callback
 ```
 
-`/api/claude/auth` creates a PKCE challenge and signed state bound to the browser session; `/api/claude/callback` exchanges the code and stores only the profile (user id and email) in the MCP store. Without OAuth credentials the workspace falls back to a guided demo sign-in: the browser is redirected to `CLAUDE_LOGIN_URL` (default `https://claude.ai/login`) and the sign-in is confirmed when the user returns.
+`/api/claude/auth` creates a PKCE challenge and signed state bound to the browser session; `/api/claude/callback` exchanges the code and stores only the profile (user id and email) in the MCP store. Without OAuth credentials the workspace falls back to a guided demo sign-in: `CLAUDE_LOGIN_URL` (default `https://claude.ai/login`) opens in a new tab and the workspace is restored automatically when that tab is closed (or when the user selects “I have signed in — continue”). Claude itself cannot redirect back to this app without a registered OAuth client, so configure the credentials above for a true same-tab authorize → callback → workspace return.
 
 No second Intuit app registration is needed. MCP Connector reuses the existing QuickBooks login and the already-configured `QB_REDIRECT_URI` / `/api/quickbooks/callback` route. If QuickBooks is not connected yet, clicking the connector starts that same login flow and returns to the connector with the company connection ready.
 
