@@ -1,6 +1,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import type { Agent } from "@/lib/types";
+import { getRuntimeEnv } from "@/lib/runtime-env";
 import {
   QB_UPDATABLE_ENTITIES,
   QUICKBOOKS_UPDATES_FILE,
@@ -13,23 +14,31 @@ const MAX_ITERATIONS = 24;
 const MAX_TOOL_RESULT_CHARS = 200_000;
 const MAX_WRITE_CHARS = 400_000;
 
-export function getClaudeConfig() {
+export type ClaudeCredentials = {
+  apiKey?: string;
+  authToken?: string;
+  model?: string;
+};
+
+export function getClaudeConfig(
+  credentials?: ClaudeCredentials | null,
+) {
   return {
-    apiKey: process.env.CLAUDE_API_KEY || "",
-    authToken: process.env.CLAUDE_AUTH_TOKEN || "",
-    model: process.env.CLAUDE_MODEL || DEFAULT_MODEL,
+    apiKey: credentials?.apiKey || getRuntimeEnv("CLAUDE_API_KEY"),
+    authToken: credentials?.authToken || getRuntimeEnv("CLAUDE_AUTH_TOKEN"),
+    model: credentials?.model || getRuntimeEnv("CLAUDE_MODEL") || DEFAULT_MODEL,
   };
 }
 
-export function claudeIsReady(): boolean {
-  const { apiKey, authToken } = getClaudeConfig();
+export function claudeIsReady(credentials?: ClaudeCredentials | null): boolean {
+  const { apiKey, authToken } = getClaudeConfig(credentials);
   return Boolean(apiKey || authToken);
 }
 
-function getModelCandidates(): string[] {
-  const { model } = getClaudeConfig();
+function getModelCandidates(credentials?: ClaudeCredentials | null): string[] {
+  const { model } = getClaudeConfig(credentials);
   const fallbacks = (
-    process.env.CLAUDE_FALLBACK_MODELS || "claude-haiku-4-5-20251001"
+    getRuntimeEnv("CLAUDE_FALLBACK_MODELS") || "claude-haiku-4-5-20251001"
   )
     .split(",")
     .map((item) => item.trim())
@@ -223,8 +232,9 @@ export async function callClaude(
   system: string,
   signal: AbortSignal,
   tools?: Record<string, unknown>[],
+  credentials?: ClaudeCredentials | null,
 ): Promise<ClaudeResponse> {
-  const { apiKey, authToken } = getClaudeConfig();
+  const { apiKey, authToken } = getClaudeConfig(credentials);
   if (!apiKey && !authToken) {
     throw new Error(
       "Something went wrong please try again later or contact the administrator",
@@ -240,7 +250,7 @@ export async function callClaude(
 
   let lastFailure = "";
 
-  for (const model of getModelCandidates()) {
+  for (const model of getModelCandidates(credentials)) {
     for (let attempt = 0; attempt < 2; attempt += 1) {
       if (signal.aborted) throw new Error("Execution cancelled.");
       const response = await fetch(CLAUDE_MESSAGES_URL, {
@@ -305,6 +315,7 @@ export async function runClaudeAgent({
   onMessage,
   onActivity,
   onFileChange,
+  credentials,
 }: {
   agent: Agent;
   prompt: string;
@@ -312,6 +323,7 @@ export async function runClaudeAgent({
   inputNames: Set<string>;
   quickBooksCounts?: string[];
   signal: AbortSignal;
+  credentials?: ClaudeCredentials | null;
 } & ClaudeRunEvents): Promise<{ input_tokens: number; output_tokens: number }> {
   const hasQuickBooksInputs = Array.from(inputNames).some((name) =>
     name.startsWith("quickbooks-"),
@@ -375,7 +387,7 @@ export async function runClaudeAgent({
   for (let iteration = 0; iteration < MAX_ITERATIONS; iteration += 1) {
     if (signal.aborted) throw new Error("Execution cancelled.");
 
-    const response = await callClaude(messages, system, signal);
+    const response = await callClaude(messages, system, signal, undefined, credentials);
     inputTokens += response.usage?.input_tokens ?? 0;
     outputTokens += response.usage?.output_tokens ?? 0;
 

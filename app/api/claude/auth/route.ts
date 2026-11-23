@@ -1,71 +1,76 @@
-import { getClaudeOAuthConfig, buildClaudeAuthUrl, createClaudePkce, getClaudeRedirectUri } from "@/lib/claude-oauth";
-import { createClaudeOAuthState, getClaudeAuth } from "@/lib/mcp/db";
-import { mcpErrorResponse, mcpJson } from "@/lib/mcp/http";
-import { resolveBrowserSession } from "@/lib/mcp/session";
+import {
+  buildClaudeAuthorizeUrl,
+  createClaudeOAuthState,
+  createClaudeParRequest,
+  createClaudePkcePair,
+  getClaudeOAuthConfig,
+  getClaudeRedirectUri,
+  hashClaudeOAuthState,
+} from "@/lib/claude-oauth";
+import { encryptCredential } from "@/lib/mcp/security";
+import { createClaudeOAuthState as saveClaudeOAuthState } from "@/lib/mcp/db";
+import { mcpJson } from "@/lib/mcp/http";
+import { resolveBrowserSession, type BrowserSession } from "@/lib/mcp/session";
 import { sanitizeReturnTo } from "@/lib/quickbooks";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
+  let session: BrowserSession | null = null;
   try {
-    const session = await resolveBrowserSession(request);
-    const existing = await getClaudeAuth(session.hash);
-    if (existing) {
+    session = await resolveBrowserSession(request);
+    const config = getClaudeOAuthConfig();
+    if (!config) {
       return mcpJson(
-        {
-          connected: true,
-          mode: existing.mode,
-          profile: {
-            id: existing.user_id,
-            email: existing.email,
-          },
-        },
-        200,
+        { error: "Claude login is not configured on this server." },
+        503,
         session,
       );
     }
 
-    const config = getClaudeOAuthConfig();
     const url = new URL(request.url);
     const returnTo = sanitizeReturnTo(url.searchParams.get("returnTo"));
-    const pkce = createClaudePkce();
-    await createClaudeOAuthState({
-      stateHash: pkce.stateHash,
-      codeVerifier: config.enabled ? pkce.codeVerifier : "demo",
+    const redirectUri = getClaudeRedirectUri(request, config);
+    const parConfig = { ...config, redirectUri };
+    const state = createClaudeOAuthState();
+    const { verifier, challenge } = createClaudePkcePair();
+    const requestUri = await createClaudeParRequest({
+      config: parConfig,
+      state,
+      codeChallenge: challenge,
+    });
+
+    await saveClaudeOAuthState({
+      stateHash: hashClaudeOAuthState(state),
+      codeVerifier: encryptCredential(
+        verifier,
+        session.hash,
+        "claude-pkce",
+      ),
       sessionHash: session.hash,
       returnTo,
+      redirectUri,
+      userProfileId: config.userProfileId,
       ttlSeconds: 10 * 60,
     });
 
-    if (config.enabled) {
-      return mcpJson(
-        {
-          connected: false,
-          mode: "oauth",
-          authUrl: buildClaudeAuthUrl({
-            config,
-            redirectUri: getClaudeRedirectUri(request),
-            state: pkce.state,
-            codeChallenge: pkce.codeChallenge,
-          }),
-        },
-        200,
-        session,
-      );
-    }
-
     return mcpJson(
       {
-        connected: false,
-        mode: "demo",
-        authUrl: config.loginUrl,
-        state: pkce.state,
+        authUrl: buildClaudeAuthorizeUrl(parConfig, requestUri),
       },
       200,
       session,
     );
   } catch (error) {
-    return mcpErrorResponse(error);
+    const message =
+      error instanceof Error
+        ? error.message
+        : "Claude login could not be started. Please try again.";
+    return mcpJson(
+      { error: message, code: "claude_error" },
+      /not configured/i.test(message) ? 503 : 502,
+      session,
+    );
   }
 }

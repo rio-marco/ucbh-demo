@@ -11,24 +11,40 @@ import os from "node:os";
 import path from "node:path";
 import { AGENT_TEMP_PREFIX } from "@/lib/agent-runtime";
 import { AGENTS } from "@/data/agents";
-import { claudeIsReady, getClaudeConfig, runClaudeAgent } from "@/lib/claude";
+import { getClaudeConfig, runClaudeAgent } from "@/lib/claude";
+import { getClaudeSessionCredentials } from "@/lib/claude-session";
+import { mcpErrorResponse, mcpJson } from "@/lib/mcp/http";
+import { resolveBrowserSession } from "@/lib/mcp/session";
+import { sessionCookieHeader } from "@/lib/mcp/security";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
-export async function GET() {
-  if (!claudeIsReady()) {
-    return Response.json({
-      ready: false,
-      reason: "auth",
-      provider: "Claude",
-      message:
-        "Something went wrong please try again later or contact the administrator",
-    });
+export async function GET(request: Request) {
+  try {
+    const session = await resolveBrowserSession(request);
+    const credentials = await getClaudeSessionCredentials(session.hash);
+    if (!credentials) {
+      return mcpJson(
+        {
+          ready: false,
+          reason: "auth",
+          provider: "Claude",
+          message: "Connect your Claude organization to continue.",
+        },
+        200,
+        session,
+      );
+    }
+    return mcpJson(
+      { ready: true, provider: "Claude", model: getClaudeConfig().model },
+      200,
+      session,
+    );
+  } catch (error) {
+    return mcpErrorResponse(error);
   }
-  const { model } = getClaudeConfig();
-  return Response.json({ ready: true, provider: "Claude", model });
 }
 
 type ExecuteBody = {
@@ -43,11 +59,15 @@ const json = (error: string, status: number) =>
   Response.json({ error }, { status });
 
 export async function POST(request: Request) {
-  if (!claudeIsReady())
-    return json(
-      "Something went wrong please try again later or contact the administrator",
-      503,
+  const session = await resolveBrowserSession(request);
+  const credentials = await getClaudeSessionCredentials(session.hash);
+  if (!credentials) {
+    return mcpJson(
+      { error: "Connect your Claude organization to continue." },
+      401,
+      session,
     );
+  }
 
   const body = (await request.json().catch(() => null)) as ExecuteBody | null;
   const agent = AGENTS.find((item) => item.id === body?.agentId);
@@ -151,6 +171,7 @@ export async function POST(request: Request) {
               changes: [{ kind: "write", path: filePath }],
               status: "completed",
             }),
+          credentials,
         });
 
         if (abort.signal.aborted) return;
@@ -179,7 +200,7 @@ export async function POST(request: Request) {
           console.error("Claude agent execution failed", error);
           send("error", {
             message:
-              "Agent execution failed. Check that the Claude API key and model are valid and see the server logs for details.",
+              "Agent execution failed. Check the server Claude credentials and model, then see the server logs for details.",
           });
         }
       } finally {
@@ -194,7 +215,7 @@ export async function POST(request: Request) {
     },
   });
 
-  return new Response(stream, {
+  const response = new Response(stream, {
     headers: {
       "Content-Type": "text/event-stream; charset=utf-8",
       "Cache-Control": "no-cache, no-transform",
@@ -202,4 +223,8 @@ export async function POST(request: Request) {
       "X-Content-Type-Options": "nosniff",
     },
   });
+  if (session.needsCookie) {
+    response.headers.append("set-cookie", sessionCookieHeader(session.raw));
+  }
+  return response;
 }

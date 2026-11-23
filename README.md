@@ -6,13 +6,10 @@ Next.js application for running Claude against uploaded CSV/JSON files and Quick
 
 ```bash
 npm install
-# Add your Claude key and optional model override to .env.local
-# CLAUDE_API_KEY=sk-ant-...
-# CLAUDE_MODEL=claude-sonnet-4-5-20250929
 npm run dev
 ```
 
-The server calls the Claude Messages API with `CLAUDE_API_KEY`. Website users do not provide an API key; it stays on the server and is never sent to the browser. `CLAUDE_AUTH_TOKEN` is also supported for bearer-token gateways. Set `CLAUDE_MODEL` to override the default model. If the primary model is unavailable or rate-limited for the key, the runner tries `CLAUDE_FALLBACK_MODELS` (comma-separated, defaults to `claude-haiku-4-5-20251001`).
+Claude uses Claude Platform OAuth: the user clicks **Connect Claude CoWork**, signs in on `auth.claude.com`, approves the app, and returns to the workspace. Tokens are exchanged and stored by the backend per browser session; users never enter an API key. `/api/claude/status` reports the per-session connection and gates MCP access. OAuth and model env files are read at runtime, so `.env*` changes apply without a process restart. Set `CLAUDE_MODEL` to override the default model; if unavailable, the runner tries `CLAUDE_FALLBACK_MODELS` (comma-separated, defaults to `claude-haiku-4-5-20251001`).
 
 ## Execution boundary
 
@@ -73,22 +70,38 @@ After Claude, the MCP connection and permissions are ready, **Continue to the pr
 
 ### Setup
 
-Copy `.env.example` and add:
+Claude login uses Claude Platform OAuth (Linked billing). It requires an eligible Claude organization with Admin or Billing access; personal `claude.ai` accounts and subscription-only organizations cannot be linked. The organization that owns the OAuth app cannot link that app to itself, so approval must come from a separate eligible Claude Console organization. For testing, link a second organization that pays Anthropic directly, not the organization that owns the OAuth app.
+
+In Claude Console:
+1. Create an OAuth app with redirect URI `<origin>/api/claude/callback` and enable **Bill and link to organizations**. Copy its client ID.
+2. Create an active user profile (`uprof_...`) that represents this app/customer.
+3. Configure Client authentication with your identity provider issuer, subject pattern, and audience. Register this app's JWKS URL `<origin>/api/claude/jwks`.
+4. Create a service account, configure Workload Identity Federation, and select the service account as the app's operator service account. Set a workspace for connection tokens. Enable Offline access only if you also add `offline_access` to `CLAUDE_OAUTH_SCOPES`.
+5. Generate an RSA key for the JWKS and set the matching key id.
 
 ```bash
+openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out claude-oauth.pem
+```
+
+Add to `.env.local`:
+
+```bash
+CLAUDE_CLIENT_ID=<client id copied from Claude Console>
+CLAUDE_USER_PROFILE_ID=<uprof_... copied from Claude Console>
+CLAUDE_OAUTH_REDIRECT_URI=http://localhost:3000/api/claude/callback
+CLAUDE_CLIENT_ASSERTION_ISSUER=<registered issuer>
+CLAUDE_CLIENT_ASSERTION_AUDIENCE=<registered audience>
+CLAUDE_CLIENT_ASSERTION_SUBJECT=<registered subject>
+CLAUDE_CLIENT_ASSERTION_KID=<registered kid>
+CLAUDE_CLIENT_ASSERTION_PRIVATE_KEY=<PEM contents with escaped \n>
+CLAUDE_OAUTH_SCOPES=billing:attribution
 TOKEN_ENCRYPTION_KEY=<base64 output of: openssl rand -base64 32>
 MCP_SIGNING_SECRET=<random string of at least 32 characters>
 ```
 
-For a real per-browser Claude sign-in redirect, add a Claude OAuth app and configure:
+`CLAUDE_OAUTH_SCOPES` must match the scopes allowed by the Claude OAuth app. If Claude returns `The requested scope is not one this client may be issued`, remove any scope the app has not enabled.
 
-```bash
-CLAUDE_CLIENT_ID=<your Claude OAuth client ID>
-CLAUDE_CLIENT_SECRET=<your Claude OAuth client secret>
-CLAUDE_OAUTH_REDIRECT_URI=http://localhost:3000/api/claude/callback
-```
-
-`/api/claude/auth` creates a PKCE challenge and signed state bound to the browser session; `/api/claude/callback` exchanges the code and stores only the profile (user id and email) in the MCP store. Without OAuth credentials the workspace falls back to a guided demo sign-in: `CLAUDE_LOGIN_URL` (default `https://claude.ai/login`) opens in a new tab and the workspace is restored automatically when that tab is closed (or when the user selects “I have signed in — continue”). Claude itself cannot redirect back to this app without a registered OAuth client, so configure the credentials above for a true same-tab authorize → callback → workspace return.
+`/api/claude/auth` creates PKCE state and a pushed authorization request, then redirects the browser to `auth.claude.com/oauth/authorize`. `/api/claude/callback` exchanges the code and encrypts the connection access/refresh tokens into the browser session. `/api/claude/jwks` serves the public key used by the client assertion. Claude env values are read from `.env*` on each request, so edits apply without restarting the process.
 
 No second Intuit app registration is needed. MCP Connector reuses the existing QuickBooks login and the already-configured `QB_REDIRECT_URI` / `/api/quickbooks/callback` route. If QuickBooks is not connected yet, clicking the connector starts that same login flow and returns to the connector with the company connection ready.
 
@@ -106,7 +119,7 @@ All tool calls, OAuth events and confirmations are written to the local audit lo
 
 ## Current deployment gaps
 
-This repository has no user authentication, durable database, billing integration, or private execution infrastructure. Runs therefore do not have authenticated ownership or durable history. The server-side Claude key is shared by executions on that deployment; for a multi-user service, add per-user authorization and durable result storage before charging for runs.
+This repository has no user authentication, durable database, billing integration, or private execution infrastructure. Runs therefore do not have authenticated ownership or durable history. Claude keys are encrypted per browser session, but the JSON-file MCP store is intended for a single-process deployment; add durable storage and per-user authorization before charging for runs.
 
 ## Checks
 

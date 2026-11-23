@@ -1,5 +1,6 @@
 import { getRequestOrigin } from "@/lib/quickbooks";
 import { runMcpChat } from "@/lib/claude-mcp";
+import { getClaudeSessionCredentials } from "@/lib/claude-session";
 import { assertMcpSecretsConfigured, McpError } from "@/lib/mcp/config";
 import { appendAuditLog, getPrimaryConnection } from "@/lib/mcp/db";
 import { mcpErrorResponse, mcpJson } from "@/lib/mcp/http";
@@ -15,6 +16,15 @@ export async function POST(request: Request) {
   try {
     session = await resolveBrowserSession(request);
     assertMcpSecretsConfigured();
+
+    const credentials = await getClaudeSessionCredentials(session.hash);
+    if (!credentials) {
+      return mcpJson(
+        { error: "Connect your Claude organization to continue." },
+        401,
+        session,
+      );
+    }
 
     const contentType = request.headers.get("content-type") || "";
     if (!contentType.includes("application/json")) {
@@ -41,6 +51,7 @@ export async function POST(request: Request) {
       sessionHash: session.hash,
       origin: getRequestOrigin(request),
       signal: request.signal,
+      credentials,
     });
 
     await appendAuditLog({

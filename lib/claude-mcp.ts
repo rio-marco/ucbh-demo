@@ -1,5 +1,6 @@
 import {
   callClaude,
+  type ClaudeCredentials,
   type ClaudeMessage,
   type ContentBlock,
 } from "@/lib/claude";
@@ -65,11 +66,13 @@ export async function runMcpChat({
   sessionHash,
   origin,
   signal,
+  credentials,
 }: {
   prompt: string;
   sessionHash: string;
   origin: string;
   signal: AbortSignal;
+  credentials?: ClaudeCredentials | null;
 }): Promise<McpChatResult> {
   await initializeMcpSession(origin, sessionHash);
   const remoteTools = await listMcpTools(origin, sessionHash);
@@ -111,7 +114,7 @@ export async function runMcpChat({
 
     let response;
     try {
-      response = await callClaude(messages, system, signal, tools);
+      response = await callClaude(messages, system, signal, tools, credentials);
     } catch (error) {
       if (error instanceof McpError) throw error;
       throw new McpError(

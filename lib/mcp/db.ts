@@ -1,7 +1,11 @@
 import { randomBytes } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import type { EncryptedCredential } from "@/lib/mcp/security";
+import {
+  decryptCredential,
+  encryptCredential,
+  type EncryptedCredential,
+} from "@/lib/mcp/security";
 
 export type BrowserSessionDoc = {
   id: string;
@@ -81,6 +85,12 @@ export type ClaudeAuthDoc = {
   user_id: string;
   email: string | null;
   mode: "oauth" | "demo";
+  connection_id: string | null;
+  access_token: EncryptedCredential | null;
+  refresh_token: EncryptedCredential | null;
+  scopes: string[];
+  access_token_expires_at: Date | null;
+  refresh_token_expires_at: Date | null;
   created_at: Date;
   updated_at: Date;
 };
@@ -88,9 +98,11 @@ export type ClaudeAuthDoc = {
 export type ClaudeStateDoc = {
   id: string;
   state_hash: string;
-  code_verifier: string;
+  code_verifier: EncryptedCredential;
   session_id: string;
   return_to: string;
+  redirect_uri: string;
+  user_profile_id: string;
   created_at: Date;
   expires_at: Date;
 };
@@ -202,7 +214,19 @@ async function readStore(): Promise<Store> {
       created_at: asDate(item.created_at),
     })),
     claudeAuth: (parsed.claudeAuth || []).map((item) => ({
-      ...(item as unknown as Omit<ClaudeAuthDoc, "created_at" | "updated_at">),
+      ...(item as unknown as Omit<
+        ClaudeAuthDoc,
+        | "access_token_expires_at"
+        | "refresh_token_expires_at"
+        | "created_at"
+        | "updated_at"
+      >),
+      access_token_expires_at: item.access_token_expires_at
+        ? asDate(item.access_token_expires_at)
+        : null,
+      refresh_token_expires_at: item.refresh_token_expires_at
+        ? asDate(item.refresh_token_expires_at)
+        : null,
       created_at: asDate(item.created_at),
       updated_at: asDate(item.updated_at),
     })),
@@ -676,9 +700,11 @@ export async function appendAuditLog(input: {
 
 export async function createClaudeOAuthState(input: {
   stateHash: string;
-  codeVerifier: string;
+  codeVerifier: EncryptedCredential;
   sessionHash: string;
   returnTo: string;
+  redirectUri: string;
+  userProfileId: string;
   ttlSeconds: number;
 }): Promise<void> {
   await withStore((store) => {
@@ -692,6 +718,8 @@ export async function createClaudeOAuthState(input: {
       code_verifier: input.codeVerifier,
       session_id: input.sessionHash,
       return_to: input.returnTo,
+      redirect_uri: input.redirectUri,
+      user_profile_id: input.userProfileId,
       created_at: now,
       expires_at: new Date(now.getTime() + input.ttlSeconds * 1000),
     });
@@ -714,20 +742,23 @@ export async function consumeClaudeOAuthState(
   });
 }
 
-export async function getClaudeAuth(
-  sessionHash: string,
-): Promise<ClaudeAuthDoc | null> {
-  return withStore(
-    (store) =>
-      store.claudeAuth.find((item) => item.session_id === sessionHash) ?? null,
-  );
-}
+export type ClaudeOAuthTokens = {
+  connectionId: string;
+  accessToken: string;
+  refreshToken: string;
+  scopes: string[];
+  accessTokenExpiresAt: Date | null;
+  refreshTokenExpiresAt: Date | null;
+};
 
-export async function saveClaudeAuth(input: {
+export async function saveClaudeOAuthTokens(input: {
   sessionHash: string;
-  userId: string;
-  email: string | null;
-  mode: ClaudeAuthDoc["mode"];
+  connectionId: string;
+  accessToken: string;
+  refreshToken: string;
+  scopes: string[];
+  accessTokenExpiresAt: Date | null;
+  refreshTokenExpiresAt: Date | null;
 }): Promise<ClaudeAuthDoc> {
   return withStore((store) => {
     const now = new Date();
@@ -738,21 +769,75 @@ export async function saveClaudeAuth(input: {
       record = {
         id: newId(),
         session_id: input.sessionHash,
-        user_id: input.userId,
-        email: input.email,
-        mode: input.mode,
+        user_id: `claude-${input.sessionHash.slice(0, 12)}`,
+        email: null,
+        mode: "oauth",
+        connection_id: input.connectionId || null,
+        access_token: encryptCredential(
+          input.accessToken,
+          input.sessionHash,
+          "claude-oauth",
+        ),
+        refresh_token: input.refreshToken
+          ? encryptCredential(
+              input.refreshToken,
+              input.sessionHash,
+              "claude-oauth",
+            )
+          : null,
+        scopes: input.scopes,
+        access_token_expires_at: input.accessTokenExpiresAt,
+        refresh_token_expires_at: input.refreshTokenExpiresAt,
         created_at: now,
         updated_at: now,
       };
       store.claudeAuth.push(record);
       return record;
     }
-    record.user_id = input.userId;
-    record.email = input.email;
-    record.mode = input.mode;
+    record.mode = "oauth";
+    record.connection_id = input.connectionId || null;
+    record.access_token = encryptCredential(
+      input.accessToken,
+      input.sessionHash,
+      "claude-oauth",
+    );
+    record.refresh_token = input.refreshToken
+      ? encryptCredential(
+          input.refreshToken,
+          input.sessionHash,
+          "claude-oauth",
+        )
+      : null;
+    record.scopes = input.scopes;
+    record.access_token_expires_at = input.accessTokenExpiresAt;
+    record.refresh_token_expires_at = input.refreshTokenExpiresAt;
     record.updated_at = now;
     return record;
   });
+}
+
+export async function getClaudeOAuthTokens(
+  sessionHash: string,
+): Promise<ClaudeOAuthTokens | null> {
+  const record = await withStore(
+    (store) =>
+      store.claudeAuth.find((item) => item.session_id === sessionHash) ?? null,
+  );
+  if (!record || record.mode !== "oauth" || !record.access_token) return null;
+  return {
+    connectionId: record.connection_id || "",
+    accessToken: decryptCredential(
+      record.access_token,
+      sessionHash,
+      "claude-oauth",
+    ),
+    refreshToken: record.refresh_token
+      ? decryptCredential(record.refresh_token, sessionHash, "claude-oauth")
+      : "",
+    scopes: record.scopes || [],
+    accessTokenExpiresAt: record.access_token_expires_at || null,
+    refreshTokenExpiresAt: record.refresh_token_expires_at || null,
+  };
 }
 
 export async function clearClaudeAuth(sessionHash: string): Promise<void> {
@@ -762,3 +847,4 @@ export async function clearClaudeAuth(sessionHash: string): Promise<void> {
     );
   });
 }
+

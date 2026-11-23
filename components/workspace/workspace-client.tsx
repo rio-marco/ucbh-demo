@@ -80,10 +80,14 @@ const QB_ERROR_MESSAGES: Record<string, string> = {
 };
 
 const CLAUDE_ERROR_MESSAGES: Record<string, string> = {
-  access_denied: "You cancelled the Claude sign-in.",
-  invalid_state: "The Claude sign-in session expired. Please try again.",
+  access_denied:
+    "Claude could not link this app to that organization. The Claude organization that owns the OAuth app cannot link to itself. Sign in with a different eligible organization where you have the Admin or Billing role.",
+  invalid_state: "The Claude login session expired. Please try again.",
   missing_params: "Claude did not return the expected details. Please try again.",
-  token_exchange: "Claude could not complete the sign-in. Please try again.",
+  token_exchange: "Claude could not complete the login. Please try again.",
+  invalid_scope:
+    "Claude rejected the requested scopes. Check CLAUDE_OAUTH_SCOPES and the OAuth app's allowed scopes.",
+  configuration: "Claude login is not configured on this server.",
 };
 
 const qbErrorMessage = (reason: string | null) =>
@@ -443,6 +447,7 @@ export default function WorkspaceClient({
   const [demoBalance, setDemoBalance] = useState(DEMO_STARTING_BALANCE);
   const [paymentOpen, setPaymentOpen] = useState(false);
   const [agentReady, setAgentReady] = useState<boolean | null>(null);
+  const [agentReadyReason, setAgentReadyReason] = useState<string | null>(null);
   const [rejectNote, setRejectNote] = useState("");
   const [cleanupOpen, setCleanupOpen] = useState(false);
   const [cleanupDone, setCleanupDone] = useState(false);
@@ -461,8 +466,7 @@ export default function WorkspaceClient({
   const [claudeConnected, setClaudeConnected] = useState(false);
   const [claudeConnecting, setClaudeConnecting] = useState(false);
   const [disconnectingAll, setDisconnectingAll] = useState(false);
-  const [claudeLoginPending, setClaudeLoginPending] = useState(false);
-  const [claudeMode, setClaudeMode] = useState<"oauth" | "demo" | null>(null);
+  const [claudeMode, setClaudeMode] = useState<"oauth" | null>(null);
   const [claudeError, setClaudeError] = useState("");
   const [permissionOpen, setPermissionOpen] = useState(false);
   const [permissionScopes, setPermissionScopes] = useState<PermissionKey[]>([
@@ -471,8 +475,6 @@ export default function WorkspaceClient({
   const [permissionGranted, setPermissionGranted] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   const traceRef = useRef<HTMLDivElement | null>(null);
-  const claudeLoginWindowRef = useRef<Window | null>(null);
-  const claudeLoginTimerRef = useRef<number | null>(null);
   const inputEstimate =
     10_000 +
     Math.ceil(
@@ -640,16 +642,26 @@ export default function WorkspaceClient({
       });
       const data = (await response.json().catch(() => ({}))) as {
         connected?: boolean;
-        mode?: "oauth" | "demo" | null;
+        configured?: boolean;
+        mode?: "oauth" | null;
+        message?: string;
         error?: string;
       };
       const connected = Boolean(data.connected);
       setClaudeConnected(connected);
       setClaudeMode(data.mode ?? null);
-      if (connected) setClaudeError("");
+      setClaudeError(
+        connected
+          ? ""
+          : data.error ||
+              (data.configured === false
+                ? data.message || "Claude login is not configured on this server."
+                : ""),
+      );
       return connected;
     } catch {
       setClaudeConnected(false);
+      setClaudeError("Could not check the Claude server connection.");
       return false;
     }
   };
@@ -748,76 +760,20 @@ export default function WorkspaceClient({
         { cache: "no-store" },
       );
       const data = (await response.json().catch(() => ({}))) as {
-        connected?: boolean;
         authUrl?: string;
-        state?: string;
-        mode?: "oauth" | "demo";
         error?: string;
       };
-      if (!response.ok) {
-        throw new Error(data.error || "Claude sign-in is not configured yet.");
-      }
-      if (data.connected) {
-        await refreshClaudeStatus();
-        return;
-      }
-      if (!data.authUrl) throw new Error("Claude sign-in is unavailable.");
-      if (data.mode === "demo" && data.state) {
-        window.localStorage.setItem("ucbh-claude-signin", data.state);
-        setClaudeLoginPending(true);
-        const loginWindow = window.open(
-          data.authUrl,
-          "ucbh-claude-login",
-          "width=1100,height=820",
-        );
-        if (loginWindow) {
-          claudeLoginWindowRef.current = loginWindow;
-          claudeLoginTimerRef.current = window.setInterval(() => {
-            if (!loginWindow.closed) return;
-            if (claudeLoginTimerRef.current !== null) {
-              window.clearInterval(claudeLoginTimerRef.current);
-              claudeLoginTimerRef.current = null;
-            }
-            claudeLoginWindowRef.current = null;
-            void confirmDemoClaudeSignIn();
-          }, 700);
-          return;
-        }
+      if (!response.ok || !data.authUrl) {
+        throw new Error(data.error || "Claude login is not configured.");
       }
       window.location.assign(data.authUrl);
     } catch (reason) {
+      setClaudeConnecting(false);
       setClaudeError(
         reason instanceof Error
           ? reason.message
-          : "Could not start the Claude sign-in.",
+          : "Could not start the Claude login.",
       );
-    } finally {
-      setClaudeConnecting(false);
-    }
-  };
-
-  const confirmDemoClaudeSignIn = async () => {
-    const state = window.localStorage.getItem("ucbh-claude-signin");
-    if (!state || claudeConnected) return;
-    try {
-      const response = await fetch("/api/claude/status", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ state }),
-      });
-      const data = (await response.json().catch(() => ({}))) as {
-        connected?: boolean;
-        error?: string;
-      };
-      if (!response.ok || !data.connected) {
-        setClaudeError(data.error || "Could not confirm the Claude sign-in.");
-        return;
-      }
-      window.localStorage.removeItem("ucbh-claude-signin");
-      setClaudeLoginPending(false);
-      await refreshClaudeStatus();
-    } catch {
-      setClaudeError("Could not confirm the Claude sign-in. Please try again.");
     }
   };
 
@@ -882,9 +838,7 @@ export default function WorkspaceClient({
     try {
       await fetch("/api/claude/status", { method: "DELETE" });
       await disconnectQuickBooks();
-      setClaudeConnected(false);
-      setClaudeMode(null);
-      setClaudeError("");
+      await refreshClaudeStatus();
       setMcpError("");
       setMcpNotice("");
       setPermissionScopes(["read"]);
@@ -915,12 +869,6 @@ export default function WorkspaceClient({
     if (mcp === "error") {
       setMcpError(qbErrorMessage(mcpReason));
     }
-    if (claude === "error") {
-      setClaudeError(claudeErrorMessage(claudeReason));
-    }
-    if (window.localStorage.getItem("ucbh-claude-signin")) {
-      setClaudeLoginPending(true);
-    }
 
     const stripParam = (key: string) => {
       const url = new URL(window.location.href);
@@ -945,10 +893,10 @@ export default function WorkspaceClient({
       if (mcpReady) {
         setMcpNotice("MCP connected successfully.");
       }
-      const claudeReady = await refreshClaudeStatus();
+      await refreshClaudeStatus();
       if (cancelled) return;
-      if (!claudeReady && window.localStorage.getItem("ucbh-claude-signin")) {
-        await confirmDemoClaudeSignIn();
+      if (claude === "error") {
+        setClaudeError(claudeErrorMessage(claudeReason));
       }
       if (qb) stripQbParams();
       if (mcp) stripParam("mcp");
@@ -956,19 +904,8 @@ export default function WorkspaceClient({
     };
 
     void initialise();
-    const onFocus = () => {
-      if (!window.localStorage.getItem("ucbh-claude-signin")) return;
-      void refreshClaudeStatus().then((ready) => {
-        if (!ready) void confirmDemoClaudeSignIn();
-      });
-    };
-    window.addEventListener("focus", onFocus);
     return () => {
       cancelled = true;
-      window.removeEventListener("focus", onFocus);
-      if (claudeLoginTimerRef.current !== null) {
-        window.clearInterval(claudeLoginTimerRef.current);
-      }
     };
     // Runs once on mount: the query strings are OAuth callback signals.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -994,8 +931,16 @@ export default function WorkspaceClient({
   useEffect(() => {
     fetch("/api/execute", { cache: "no-store" })
       .then((response) => response.json())
-      .then((data) => setAgentReady(Boolean(data.ready)))
-      .catch(() => setAgentReady(false));
+      .then((data) => {
+        setAgentReady(Boolean(data.ready));
+        setAgentReadyReason(
+          typeof data.reason === "string" ? data.reason : null,
+        );
+      })
+      .catch(() => {
+        setAgentReady(false);
+        setAgentReadyReason(null);
+      });
   }, []);
 
   useEffect(() => {
@@ -1607,7 +1552,7 @@ export default function WorkspaceClient({
                 {error}
               </div>
             )}
-            {agentReady === false && (
+            {agentReady === false && agentReadyReason !== "auth" && (
               <div className="flex items-start gap-2 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-xs leading-relaxed text-amber-950">
                 <LockKeyhole className="mt-0.5 h-4 w-4 shrink-0" />
                 <span>
@@ -1740,13 +1685,14 @@ export default function WorkspaceClient({
                                 Claude CoWork
                               </p>
                               <p className="mt-1 text-[10.5px] leading-relaxed text-muted-foreground">
-                                You are redirected to Claude to sign in to your
-                                own CoWork account before anything is connected.
+                                Sign in with your Claude organization. The
+                                approval happens on Claude, then this browser
+                                returns here for MCP access.
                               </p>
                               <button
                                 type="button"
                                 onClick={() => void connectClaude()}
-                                disabled={claudeConnecting || claudeConnected}
+                                disabled={claudeConnected || claudeConnecting}
                                 className={`mt-3 flex w-full items-center justify-center gap-2 rounded-xl px-3 py-2 text-[11px] font-semibold text-white transition ${
                                   claudeConnected
                                     ? "cursor-default bg-emerald-600 opacity-100"
@@ -1760,29 +1706,12 @@ export default function WorkspaceClient({
                                 ) : (
                                   <ArrowRight className="h-3.5 w-3.5" />
                                 )}
-                                {claudeConnected
-                                  ? "Claude CoWork connected"
-                                  : claudeConnecting
-                                    ? "Connecting to Claude…"
+                                {claudeConnecting
+                                  ? "Opening Claude"
+                                  : claudeConnected
+                                    ? "Claude CoWork connected"
                                     : "Connect Claude CoWork"}
                               </button>
-                              {claudeLoginPending && !claudeConnected && (
-                                <div className="mt-2 rounded-xl border border-primary/20 bg-primary/[0.04] p-2.5">
-                                  <p className="text-[10px] leading-relaxed text-muted-foreground">
-                                    Claude login opened in a new tab. Sign in,
-                                    then close that tab to return here.
-                                  </p>
-                                  <button
-                                    type="button"
-                                    onClick={() =>
-                                      void confirmDemoClaudeSignIn()
-                                    }
-                                    className="mt-1.5 text-[10px] font-semibold text-primary underline underline-offset-2"
-                                  >
-                                    I have signed in — continue
-                                  </button>
-                                </div>
-                              )}
                               {claudeError && (
                                 <p className="mt-2 flex items-start gap-1.5 text-[10px] leading-relaxed text-red-600">
                                   <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
