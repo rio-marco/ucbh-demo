@@ -48,7 +48,6 @@ import type {
 } from "@/lib/types";
 import {
   parseQuickBooksUpdates,
-  QB_RECORD_DEFINITIONS,
   QUICKBOOKS_UPDATES_FILE,
   type QuickBooksUpdateOperation,
 } from "@/lib/quickbooks-entities";
@@ -70,14 +69,6 @@ const MAX_TASK_FILE_BYTES = 2_000_000;
 const MAX_TASK_TOTAL_BYTES = 20_000_000;
 const QB_MAX_FILES = MAX_TASK_FILES;
 const QB_MAX_TOTAL_BYTES = MAX_TASK_TOTAL_BYTES;
-
-type QuickBooksPayload = Record<string, any>;
-type QbSummary = {
-  records: number;
-  files: number;
-  entities: { label: string; count: number; file: string }[];
-  counts: { label: string; count: number }[];
-};
 
 const QB_ERROR_MESSAGES: Record<string, string> = {
   access_denied: "You cancelled the QuickBooks authorization.",
@@ -133,74 +124,6 @@ const PERMISSION_OPTIONS: {
     detail: "Void transactions and remove records when the agent proposes it.",
   },
 ];
-
-function qbEntities<T = Record<string, unknown>>(
-  payload: unknown,
-  key: string,
-): T[] {
-  const value = (payload as any)?.QueryResponse?.[key];
-  return Array.isArray(value) ? (value as T[]) : [];
-}
-
-function csvEscape(value: unknown): string {
-  if (value === null || value === undefined) return "";
-  const text =
-    typeof value === "object" ? JSON.stringify(value) : String(value);
-  return /[",\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
-}
-
-function toCsv(rows: Record<string, unknown>[]): string {
-  if (!rows.length) return "";
-  const columns = Array.from(
-    rows.reduce((set, row) => {
-      Object.keys(row).forEach((key) => set.add(key));
-      return set;
-    }, new Set<string>()),
-  );
-  const lines = [columns.map(csvEscape).join(",")];
-  for (const row of rows) {
-    lines.push(columns.map((column) => csvEscape(row[column])).join(","));
-  }
-  return lines.join("\n");
-}
-
-function summarizeQuickBooks(data: QuickBooksPayload): QbSummary {
-  const counts = QB_RECORD_DEFINITIONS.map((definition) => ({
-    label: definition.label,
-    count: qbEntities(data[definition.key], definition.entity).length,
-    file: definition.file,
-  }));
-  const entities = counts.filter((item) => item.count > 0);
-
-  return {
-    records: counts.reduce((sum, item) => sum + item.count, 0),
-    files: entities.length,
-    entities,
-    counts: counts.map(({ label, count }) => ({ label, count })),
-  };
-}
-
-function quickBooksToFiles(data: QuickBooksPayload): Upload[] {
-  const files: Upload[] = [];
-  const encodeSize = (content: string) =>
-    new TextEncoder().encode(content).length;
-
-  const addCsv = (name: string, rows: Record<string, unknown>[]) => {
-    if (!rows.length) return;
-    const content = toCsv(rows);
-    if (!content) return;
-    files.push({ name, content, size: encodeSize(content) });
-  };
-
-  for (const definition of QB_RECORD_DEFINITIONS) {
-    addCsv(
-      definition.file,
-      qbEntities(data[definition.key], definition.entity),
-    );
-  }
-
-  return files;
-}
 
 const createSessionId = () => {
   const webCrypto = globalThis.crypto;
@@ -530,11 +453,6 @@ export default function WorkspaceClient({
   const [qbConnected, setQbConnected] = useState(false);
   const [qbCompanyName, setQbCompanyName] = useState<string | null>(null);
   const [qbRealmId, setQbRealmId] = useState<string | null>(null);
-  const [qbSummary, setQbSummary] = useState<QbSummary | null>(null);
-  const [qbDataLoading, setQbDataLoading] = useState(false);
-  const [qbDataError, setQbDataError] = useState("");
-  const [qbDataWarning, setQbDataWarning] = useState("");
-  const [qbImported, setQbImported] = useState(false);
   const [qbError, setQbError] = useState("");
   const [mcpConnected, setMcpConnected] = useState(false);
   const [mcpConnecting, setMcpConnecting] = useState(false);
@@ -542,6 +460,7 @@ export default function WorkspaceClient({
   const [mcpError, setMcpError] = useState("");
   const [claudeConnected, setClaudeConnected] = useState(false);
   const [claudeConnecting, setClaudeConnecting] = useState(false);
+  const [disconnectingAll, setDisconnectingAll] = useState(false);
   const [claudeMode, setClaudeMode] = useState<"oauth" | "demo" | null>(null);
   const [claudeError, setClaudeError] = useState("");
   const [permissionOpen, setPermissionOpen] = useState(false);
@@ -551,7 +470,6 @@ export default function WorkspaceClient({
   const [permissionGranted, setPermissionGranted] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   const traceRef = useRef<HTMLDivElement | null>(null);
-  const qbAutoImportRef = useRef(false);
   const inputEstimate =
     10_000 +
     Math.ceil(
@@ -733,76 +651,8 @@ export default function WorkspaceClient({
     }
   };
 
-  const importQuickBooksData = async () => {
-    setQbDataLoading(true);
-    setQbDataError("");
-    setQbDataWarning("");
-    try {
-      const response = await fetch("/api/quickbooks/data?type=all", {
-        cache: "no-store",
-        signal: AbortSignal.timeout(60_000),
-      });
-      const payload = (await response.json().catch(() => ({}))) as {
-        data?: QuickBooksPayload;
-        errors?: Record<string, string>;
-        error?: string;
-      };
-      if (!response.ok || !payload.data) {
-        throw new Error(payload.error || "Could not load QuickBooks data.");
-      }
-
-      setQbSummary(summarizeQuickBooks(payload.data));
-
-      if (payload.errors && Object.keys(payload.errors).length) {
-        const labels = Object.keys(payload.errors).map(
-          (key) =>
-            QB_RECORD_DEFINITIONS.find((definition) => definition.key === key)
-              ?.label ?? key,
-        );
-        // setQbDataWarning(
-        //   `Some record types could not be loaded: ${labels.join(", ")}.`,
-        // );
-      }
-
-      const generated = quickBooksToFiles(payload.data);
-      if (!generated.length) {
-        setQbDataError(
-          "Connected, but there are no QuickBooks records to import yet.",
-        );
-        return;
-      }
-
-      const retained = files.filter(
-        (file) => !file.name.startsWith("quickbooks-"),
-      );
-      const combined = [...retained, ...generated];
-      const totalSize = combined.reduce((sum, file) => sum + file.size, 0);
-      if (combined.length > QB_MAX_FILES || totalSize > QB_MAX_TOTAL_BYTES) {
-        setQbDataError(
-          `QuickBooks data is larger than the task upload limit (${QB_MAX_FILES} files / ${Math.round(
-            QB_MAX_TOTAL_BYTES / 1_000_000,
-          )} MB). Remove some files and retry.`,
-        );
-        return;
-      }
-
-      setFiles(combined);
-      setQbImported(true);
-    } catch (reason) {
-      setQbDataError(
-        reason instanceof Error
-          ? reason.message
-          : "Could not load QuickBooks data.",
-      );
-    } finally {
-      setQbDataLoading(false);
-    }
-  };
-
   const connectQuickBooks = async () => {
     setQbError("");
-    setQbDataError("");
-    setQbDataWarning("");
     setQbConnecting(true);
     try {
       const url = new URL(window.location.href);
@@ -836,6 +686,10 @@ export default function WorkspaceClient({
   };
 
   const connectMcp = async () => {
+    if (!claudeConnected) {
+      setMcpError("Connect Claude CoWork first.");
+      return;
+    }
     setMcpError("");
     setMcpNotice("");
     setMcpConnecting(true);
@@ -953,6 +807,10 @@ export default function WorkspaceClient({
   };
 
   const grantPermission = () => {
+    if (!claudeConnected || !mcpConnected) {
+      setPermissionOpen(false);
+      return;
+    }
     if (!permissionScopes.length) {
       setError("Choose at least one action to allow in QuickBooks Online.");
       return;
@@ -973,9 +831,7 @@ export default function WorkspaceClient({
   };
 
   const disconnectQuickBooks = async () => {
-    setQbDataLoading(true);
-    setQbDataError("");
-    setQbDataWarning("");
+    setQbError("");
     try {
       const response = await fetch("/api/quickbooks/status", {
         method: "DELETE",
@@ -987,22 +843,36 @@ export default function WorkspaceClient({
       setQbConnected(false);
       setQbCompanyName(null);
       setQbRealmId(null);
-      setQbSummary(null);
-      setQbImported(false);
       setMcpConnected(false);
       setMcpNotice("");
       setMcpError("");
       setPermissionGranted(false);
       window.localStorage.removeItem("ucbh-qb-permission");
-      qbAutoImportRef.current = false;
-      setFiles((current) =>
-        current.filter((file) => !file.name.startsWith("quickbooks-")),
-      );
       setQbDialogOpen(false);
     } catch {
-      setQbDataError("Could not disconnect QuickBooks. Please try again.");
+      setQbError("Could not disconnect QuickBooks. Please try again.");
+    }
+  };
+
+  const disconnectAllAccounts = async () => {
+    setDisconnectingAll(true);
+    try {
+      await fetch("/api/claude/status", { method: "DELETE" });
+      await disconnectQuickBooks();
+      setClaudeConnected(false);
+      setClaudeMode(null);
+      setClaudeError("");
+      setMcpError("");
+      setMcpNotice("");
+      setPermissionScopes(["read"]);
+      setPermissionGranted(false);
+      setPermissionOpen(false);
+      window.localStorage.removeItem("ucbh-qb-permission");
+      setError("");
+    } catch {
+      setError("Could not disconnect all accounts. Please try again.");
     } finally {
-      setQbDataLoading(false);
+      setDisconnectingAll(false);
     }
   };
 
@@ -1093,19 +963,6 @@ export default function WorkspaceClient({
   }, []);
 
   useEffect(() => {
-    if (stage !== "task" || !qbConnected || qbDataLoading || qbImported) {
-      return;
-    }
-    if (files.length > 0 || qbAutoImportRef.current) return;
-    // QuickBooks remains connected across tasks, but its CSV files only live
-    // in this page's state. Re-import automatically so returning users are
-    // not left with an empty attachment list and a disabled Continue button.
-    qbAutoImportRef.current = true;
-    void importQuickBooksData();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stage, qbConnected, qbDataLoading, qbImported, files.length]);
-
-  useEffect(() => {
     fetch("/api/execute", { cache: "no-store" })
       .then((response) => response.json())
       .then((data) => setAgentReady(Boolean(data.ready)))
@@ -1190,12 +1047,8 @@ export default function WorkspaceClient({
     setUsage(null);
     setError("");
     setCleanupDone(false);
-    setQbImported(false);
-    setQbDataError("");
-    setQbDataWarning("");
     setPermissionGranted(false);
     window.localStorage.removeItem("ucbh-qb-permission");
-    qbAutoImportRef.current = false;
     setRunProgress(0);
     setActiveSessionId(createSessionId());
   };
@@ -1312,9 +1165,6 @@ export default function WorkspaceClient({
           prompt: runPrompt,
           files: files.map(({ name, content }) => ({ name, content })),
           environment: runtime,
-          quickBooksCounts: qbSummary?.counts.map(
-            (entity) => `${entity.label}: ${entity.count}`,
-          ),
         }),
         signal: abort.signal,
       });
@@ -1830,8 +1680,8 @@ export default function WorkspaceClient({
                                 Connect your own accounts
                               </h2>
                               <p className="mt-1 max-w-xl text-[11px] leading-relaxed text-muted-foreground">
-                                Sign in to Claude, link the QuickBooks MCP
-                                connection, then choose what the agent may do.
+                                Connect Claude CoWork first, then the QuickBook
+                                MCP connection, then set QuickBooks permission.
                                 Each step belongs to this browser session.
                               </p>
                             </div>
@@ -1858,17 +1708,21 @@ export default function WorkspaceClient({
                                 </span>
                               </div>
                               <p className="mt-3 text-xs font-semibold">
-                                Claude account
+                                Claude CoWork
                               </p>
                               <p className="mt-1 text-[10.5px] leading-relaxed text-muted-foreground">
                                 You are redirected to Claude to sign in to your
-                                own account before anything is connected.
+                                own CoWork account before anything is connected.
                               </p>
                               <button
                                 type="button"
                                 onClick={() => void connectClaude()}
                                 disabled={claudeConnecting || claudeConnected}
-                                className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-3 py-2 text-[11px] font-semibold text-white transition hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
+                                className={`mt-3 flex w-full items-center justify-center gap-2 rounded-xl px-3 py-2 text-[11px] font-semibold text-white transition ${
+                                  claudeConnected
+                                    ? "cursor-default bg-emerald-600 opacity-100"
+                                    : "bg-primary hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
+                                }`}
                               >
                                 {claudeConnecting ? (
                                   <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -1878,8 +1732,10 @@ export default function WorkspaceClient({
                                   <ArrowRight className="h-3.5 w-3.5" />
                                 )}
                                 {claudeConnected
-                                  ? "Claude signed in"
-                                  : "Sign in to Claude"}
+                                  ? "Claude CoWork connected"
+                                  : claudeConnecting
+                                    ? "Connecting to Claude…"
+                                    : "Connect Claude CoWork"}
                               </button>
                               {claudeConnected && (
                                 <div className="mt-2 flex items-center justify-between gap-2">
@@ -1930,31 +1786,42 @@ export default function WorkspaceClient({
                                 </span>
                               </div>
                               <p className="mt-3 text-xs font-semibold">
-                                MCP connection
+                                QuickBook MCP
                               </p>
                               <p className="mt-1 text-[10.5px] leading-relaxed text-muted-foreground">
                                 Link the secure MCP server to your QuickBooks
                                 company so the agent can read the approved data.
                               </p>
-                              <button
-                                type="button"
-                                onClick={() => void connectMcp()}
-                                disabled={mcpConnecting || mcpConnected}
-                                className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-ink/15 bg-white px-3 py-2 text-[11px] font-semibold transition hover:border-primary/30 hover:shadow-sm disabled:cursor-not-allowed disabled:opacity-60"
-                              >
-                                {mcpConnecting ? (
-                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                                ) : mcpConnected ? (
-                                  <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
-                                ) : (
-                                  <ArrowRight className="h-3.5 w-3.5" />
-                                )}
-                                {mcpConnected
-                                  ? "MCP connected"
-                                  : mcpConnecting
-                                    ? "Connecting…"
-                                    : "Connect MCP"}
-                              </button>
+                              {!claudeConnected ? (
+                                <p className="mt-3 flex items-center gap-2 rounded-xl border border-dashed border-ink/15 bg-white/60 px-3 py-2.5 text-[10.5px] leading-relaxed text-muted-foreground">
+                                  <LockKeyhole className="h-3.5 w-3.5 shrink-0" />
+                                  Waiting for Claude CoWork connection
+                                </p>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => void connectMcp()}
+                                  disabled={mcpConnecting || mcpConnected}
+                                  className={`mt-3 flex w-full items-center justify-center gap-2 rounded-xl border px-3 py-2 text-[11px] font-semibold transition ${
+                                    mcpConnected
+                                      ? "cursor-default border-emerald-600 bg-emerald-600 opacity-100 text-white"
+                                      : "border-ink/15 bg-white text-ink hover:border-primary/30 hover:shadow-sm disabled:cursor-not-allowed disabled:opacity-60"
+                                  }`}
+                                >
+                                  {mcpConnecting ? (
+                                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                  ) : mcpConnected ? (
+                                    <CheckCircle2 className="h-3.5 w-3.5" />
+                                  ) : (
+                                    <ArrowRight className="h-3.5 w-3.5" />
+                                  )}
+                                  {mcpConnected
+                                    ? "QuickBook MCP connected"
+                                    : mcpConnecting
+                                      ? "Connecting…"
+                                      : "QuickBook MCP connect"}
+                                </button>
+                              )}
                               {mcpConnected && (
                                 <p className="mt-2 truncate text-[9.5px] text-emerald-700">
                                   {mcpNotice || qbCompanyName || "MCP connected successfully."}
@@ -1988,21 +1855,33 @@ export default function WorkspaceClient({
                                 Decide what the agent is allowed to do in
                                 QuickBooks Online before you continue.
                               </p>
-                              <button
-                                type="button"
-                                onClick={() => setPermissionOpen(true)}
-                                disabled={!claudeConnected || !mcpConnected}
-                                className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-ink/15 bg-white px-3 py-2 text-[11px] font-semibold transition hover:border-primary/30 hover:shadow-sm disabled:cursor-not-allowed disabled:opacity-50"
-                              >
-                                {permissionGranted ? (
-                                  <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
-                                ) : (
-                                  <LockKeyhole className="h-3.5 w-3.5" />
-                                )}
-                                {permissionGranted
-                                  ? "Review permission"
-                                  : "Choose permission"}
-                              </button>
+                              {!claudeConnected || !mcpConnected ? (
+                                <p className="mt-3 flex items-center gap-2 rounded-xl border border-dashed border-ink/15 bg-white/60 px-3 py-2.5 text-[10.5px] leading-relaxed text-muted-foreground">
+                                  <LockKeyhole className="h-3.5 w-3.5 shrink-0" />
+                                  {!claudeConnected
+                                    ? "Waiting for Claude CoWork connection"
+                                    : "Waiting for QuickBook MCP connection"}
+                                </p>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => setPermissionOpen(true)}
+                                  className={`mt-3 flex w-full items-center justify-center gap-2 rounded-xl border px-3 py-2 text-[11px] font-semibold transition ${
+                                    permissionGranted
+                                      ? "cursor-default border-emerald-600 bg-emerald-600 opacity-100 text-white"
+                                      : "border-ink/15 bg-white text-ink hover:border-primary/30 hover:shadow-sm"
+                                  }`}
+                                >
+                                  {permissionGranted ? (
+                                    <CheckCircle2 className="h-3.5 w-3.5" />
+                                  ) : (
+                                    <ShieldCheck className="h-3.5 w-3.5" />
+                                  )}
+                                  {permissionGranted
+                                    ? "QuickBooks permission set"
+                                    : "Set QuickBooks permission"}
+                                </button>
+                              )}
                               {permissionGranted && (
                                 <p className="mt-2 truncate text-[9.5px] text-emerald-700">
                                   {permissionScopes
@@ -2017,6 +1896,32 @@ export default function WorkspaceClient({
                                 </p>
                               )}
                             </div>
+                          </div>
+
+                          <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-ink/8 pt-4">
+                            <p className="max-w-md text-[10.5px] leading-relaxed text-muted-foreground">
+                              Disconnecting clears Claude CoWork, QuickBook MCP
+                              and the QuickBooks permission for this browser.
+                            </p>
+                            <Button
+                              variant="line"
+                              onClick={() => void disconnectAllAccounts()}
+                              disabled={
+                                disconnectingAll ||
+                                (!claudeConnected &&
+                                  !mcpConnected &&
+                                  !permissionGranted)
+                              }
+                            >
+                              {disconnectingAll ? (
+                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              ) : (
+                                <RotateCcw className="h-3.5 w-3.5" />
+                              )}
+                              {disconnectingAll
+                                ? "Disconnecting…"
+                                : "Disconnect"}
+                            </Button>
                           </div>
                         </div>
                       </div>
@@ -2127,7 +2032,7 @@ export default function WorkspaceClient({
                         </span>
                         <span className="chip">
                           <DatabaseZap className="h-3 w-3" />
-                          MCP {mcpConnected ? "ready" : "pending"}
+                          QuickBook {mcpConnected ? "ready" : "pending"}
                         </span>
                         <span className="chip">
                           <ShieldCheck className="h-3 w-3" />
@@ -2833,73 +2738,20 @@ export default function WorkspaceClient({
                 </div>
 
                 <div className="rounded-xl border border-ink/8 bg-paper/60 p-3.5">
-                  <div className="flex items-center justify-between gap-2">
-                    <p className="text-[11px] font-semibold">QuickBooks data</p>
-                    <span className="font-mono text-[9px] uppercase tracking-wide text-muted-foreground">
-                      {qbDataLoading
-                        ? "Loading"
-                        : qbSummary
-                          ? "Ready"
-                          : "Not loaded"}
-                    </span>
-                  </div>
-                  {qbSummary ? (
-                    <div className="mt-2 space-y-2">
-                      <p className="rounded-lg bg-white px-2 py-1.5 text-[10.5px] font-semibold">
-                        {qbSummary.records} records · {qbSummary.files} files
-                      </p>
-                      <dl className="grid max-h-56 grid-cols-2 gap-1.5 overflow-y-auto text-[10.5px]">
-                        {qbSummary.entities.map((entity) => (
-                          <div
-                            key={entity.file}
-                            className="flex justify-between rounded-lg bg-white px-2 py-1.5"
-                          >
-                            <dt className="text-muted-foreground">
-                              {entity.label}
-                            </dt>
-                            <dd className="font-semibold">{entity.count}</dd>
-                          </div>
-                        ))}
-                      </dl>
-                    </div>
-                  ) : (
-                    <p className="mt-2 text-[10.5px] leading-relaxed text-muted-foreground">
-                      Load customers, vendors, employees and invoices from
-                      QuickBooks to use them in this task.
-                    </p>
-                  )}
-                  {qbDataWarning && (
-                    <p className="mt-2 text-[10.5px] leading-relaxed text-amber-700">
-                      {qbDataWarning}
-                    </p>
-                  )}
-                  {qbDataError && (
-                    <p className="mt-2 text-[10.5px] leading-relaxed text-red-600">
-                      {qbDataError}
-                    </p>
-                  )}
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      onClick={() => void importQuickBooksData()}
-                      disabled={qbDataLoading}
-                      className="rounded-lg bg-[#2CA01C] px-2.5 py-1.5 text-[10px] font-semibold text-white transition hover:bg-[#248B17] disabled:opacity-60"
-                    >
-                      {qbDataLoading
-                        ? "Loading…"
-                        : qbImported
-                          ? "Refresh imported data"
-                          : "Import data into task"}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => void disconnectQuickBooks()}
-                      disabled={qbDataLoading}
-                      className="rounded-lg border border-ink/15 bg-white px-2.5 py-1.5 text-[10px] font-semibold text-ink/70 transition hover:bg-paper disabled:opacity-60"
-                    >
-                      Disconnect
-                    </button>
-                  </div>
+                  <p className="text-[11px] font-semibold">
+                    QuickBooks connection
+                  </p>
+                  <p className="mt-1 text-[10.5px] leading-relaxed text-muted-foreground">
+                    This connection is used by the MCP server only. Add task
+                    files in the Upload Files tab.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => void disconnectQuickBooks()}
+                    className="mt-3 rounded-lg border border-ink/15 bg-white px-2.5 py-1.5 text-[10px] font-semibold text-ink/70 transition hover:bg-paper"
+                  >
+                    Disconnect
+                  </button>
                 </div>
 
                 <div className="flex justify-end">
