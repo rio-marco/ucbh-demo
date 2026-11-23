@@ -88,9 +88,51 @@ const QB_ERROR_MESSAGES: Record<string, string> = {
     "QuickBooks could not complete the connection. Please try again.",
 };
 
+const CLAUDE_ERROR_MESSAGES: Record<string, string> = {
+  access_denied: "You cancelled the Claude sign-in.",
+  invalid_state: "The Claude sign-in session expired. Please try again.",
+  missing_params: "Claude did not return the expected details. Please try again.",
+  token_exchange: "Claude could not complete the sign-in. Please try again.",
+};
+
 const qbErrorMessage = (reason: string | null) =>
   (reason && QB_ERROR_MESSAGES[reason]) ||
   "Could not connect to QuickBooks. Please try again.";
+
+const claudeErrorMessage = (reason: string | null) =>
+  (reason && CLAUDE_ERROR_MESSAGES[reason]) ||
+  "Could not sign in to Claude. Please try again.";
+
+type TaskTab = "mcp" | "upload";
+type TaskView = "setup" | "prompt";
+type PermissionKey = "read" | "create" | "update" | "delete";
+
+const PERMISSION_OPTIONS: {
+  key: PermissionKey;
+  title: string;
+  detail: string;
+}[] = [
+  {
+    key: "read",
+    title: "View company data",
+    detail: "Read customers, invoices, vendors and other listed records.",
+  },
+  {
+    key: "create",
+    title: "Create records",
+    detail: "Add new customers, invoices, bills and other supported records.",
+  },
+  {
+    key: "update",
+    title: "Update records",
+    detail: "Change existing records with your review before write-back.",
+  },
+  {
+    key: "delete",
+    title: "Void or delete records",
+    detail: "Void transactions and remove records when the agent proposes it.",
+  },
+];
 
 function qbEntities<T = Record<string, unknown>>(
   payload: unknown,
@@ -456,6 +498,8 @@ export default function WorkspaceClient({
   };
 }) {
   const [stage, setStage] = useState<Stage>("task");
+  const [taskView, setTaskView] = useState<TaskView>("setup");
+  const [taskTab, setTaskTab] = useState<TaskTab>("mcp");
   const [activeSessionId, setActiveSessionId] = useState(
     resume?.sessionId ?? sessionId,
   );
@@ -496,6 +540,15 @@ export default function WorkspaceClient({
   const [mcpConnecting, setMcpConnecting] = useState(false);
   const [mcpNotice, setMcpNotice] = useState("");
   const [mcpError, setMcpError] = useState("");
+  const [claudeConnected, setClaudeConnected] = useState(false);
+  const [claudeConnecting, setClaudeConnecting] = useState(false);
+  const [claudeMode, setClaudeMode] = useState<"oauth" | "demo" | null>(null);
+  const [claudeError, setClaudeError] = useState("");
+  const [permissionOpen, setPermissionOpen] = useState(false);
+  const [permissionScopes, setPermissionScopes] = useState<PermissionKey[]>([
+    "read",
+  ]);
+  const [permissionGranted, setPermissionGranted] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   const traceRef = useRef<HTMLDivElement | null>(null);
   const qbAutoImportRef = useRef(false);
@@ -592,6 +645,7 @@ export default function WorkspaceClient({
     name: file.name,
     size: file.size,
   }));
+  const setupComplete = claudeConnected && mcpConnected && permissionGranted;
 
   const stripQbParams = () => {
     const url = new URL(window.location.href);
@@ -653,6 +707,28 @@ export default function WorkspaceClient({
       setMcpError(
         "The MCP Connector is unavailable. Please try again shortly.",
       );
+      return false;
+    }
+  };
+
+  const refreshClaudeStatus = async (): Promise<boolean> => {
+    try {
+      const response = await fetch("/api/claude/status", {
+        cache: "no-store",
+        signal: AbortSignal.timeout(15_000),
+      });
+      const data = (await response.json().catch(() => ({}))) as {
+        connected?: boolean;
+        mode?: "oauth" | "demo" | null;
+        error?: string;
+      };
+      const connected = Boolean(data.connected);
+      setClaudeConnected(connected);
+      setClaudeMode(data.mode ?? null);
+      if (connected) setClaudeError("");
+      return connected;
+    } catch {
+      setClaudeConnected(false);
       return false;
     }
   };
@@ -802,6 +878,100 @@ export default function WorkspaceClient({
     }
   };
 
+  const connectClaude = async () => {
+    setClaudeError("");
+    setClaudeConnecting(true);
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.delete("claude");
+      url.searchParams.delete("reason");
+      const returnTo = `${url.pathname}${url.search}`;
+      const response = await fetch(
+        `/api/claude/auth?returnTo=${encodeURIComponent(returnTo)}`,
+        { cache: "no-store" },
+      );
+      const data = (await response.json().catch(() => ({}))) as {
+        connected?: boolean;
+        authUrl?: string;
+        state?: string;
+        mode?: "oauth" | "demo";
+        error?: string;
+      };
+      if (!response.ok) {
+        throw new Error(data.error || "Claude sign-in is not configured yet.");
+      }
+      if (data.connected) {
+        await refreshClaudeStatus();
+        return;
+      }
+      if (!data.authUrl) throw new Error("Claude sign-in is unavailable.");
+      if (data.mode === "demo" && data.state) {
+        window.localStorage.setItem("ucbh-claude-signin", data.state);
+      }
+      window.location.assign(data.authUrl);
+    } catch (reason) {
+      setClaudeError(
+        reason instanceof Error
+          ? reason.message
+          : "Could not start the Claude sign-in.",
+      );
+    } finally {
+      setClaudeConnecting(false);
+    }
+  };
+
+  const confirmDemoClaudeSignIn = async () => {
+    const state = window.localStorage.getItem("ucbh-claude-signin");
+    if (!state || claudeConnected) return;
+    try {
+      const response = await fetch("/api/claude/status", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ state }),
+      });
+      const data = (await response.json().catch(() => ({}))) as {
+        connected?: boolean;
+        error?: string;
+      };
+      if (!response.ok || !data.connected) {
+        setClaudeError(data.error || "Could not confirm the Claude sign-in.");
+        return;
+      }
+      window.localStorage.removeItem("ucbh-claude-signin");
+      await refreshClaudeStatus();
+    } catch {
+      setClaudeError("Could not confirm the Claude sign-in. Please try again.");
+    }
+  };
+
+  const togglePermission = (key: PermissionKey) => {
+    setPermissionScopes((current) =>
+      current.includes(key)
+        ? current.filter((item) => item !== key)
+        : [...current, key],
+    );
+  };
+
+  const grantPermission = () => {
+    if (!permissionScopes.length) {
+      setError("Choose at least one action to allow in QuickBooks Online.");
+      return;
+    }
+    setError("");
+    setPermissionGranted(true);
+    setPermissionOpen(false);
+    window.localStorage.setItem(
+      "ucbh-qb-permission",
+      JSON.stringify(permissionScopes),
+    );
+  };
+
+  const revokePermission = () => {
+    setPermissionGranted(false);
+    setPermissionOpen(true);
+    window.localStorage.removeItem("ucbh-qb-permission");
+  };
+
   const disconnectQuickBooks = async () => {
     setQbDataLoading(true);
     setQbDataError("");
@@ -822,6 +992,8 @@ export default function WorkspaceClient({
       setMcpConnected(false);
       setMcpNotice("");
       setMcpError("");
+      setPermissionGranted(false);
+      window.localStorage.removeItem("ucbh-qb-permission");
       qbAutoImportRef.current = false;
       setFiles((current) =>
         current.filter((file) => !file.name.startsWith("quickbooks-")),
@@ -841,6 +1013,8 @@ export default function WorkspaceClient({
     const reason = params.get("reason");
     const mcp = params.get("mcp");
     const mcpReason = params.get("mcpReason");
+    const claude = params.get("claude");
+    const claudeReason = params.get("reason");
 
     if (qb === "error") {
       setQbError(qbErrorMessage(reason));
@@ -848,6 +1022,21 @@ export default function WorkspaceClient({
     if (mcp === "error") {
       setMcpError(qbErrorMessage(mcpReason));
     }
+    if (claude === "error") {
+      setClaudeError(claudeErrorMessage(claudeReason));
+    }
+
+    const stripParam = (key: string) => {
+      const url = new URL(window.location.href);
+      url.searchParams.delete(key);
+      if (key === "claude") url.searchParams.delete("reason");
+      if (key === "mcp") url.searchParams.delete("mcpReason");
+      window.history.replaceState(
+        null,
+        "",
+        `${url.pathname}${url.search}${url.hash}`,
+      );
+    };
 
     const initialise = async () => {
       const connected = await refreshQbStatus();
@@ -860,25 +1049,47 @@ export default function WorkspaceClient({
       if (mcpReady) {
         setMcpNotice("MCP connected successfully.");
       }
-      if (qb) stripQbParams();
-      if (mcp) {
-        const url = new URL(window.location.href);
-        url.searchParams.delete("mcp");
-        url.searchParams.delete("mcpReason");
-        window.history.replaceState(
-          null,
-          "",
-          `${url.pathname}${url.search}${url.hash}`,
-        );
+      const claudeReady = await refreshClaudeStatus();
+      if (cancelled) return;
+      if (!claudeReady && window.localStorage.getItem("ucbh-claude-signin")) {
+        await confirmDemoClaudeSignIn();
       }
+      if (qb) stripQbParams();
+      if (mcp) stripParam("mcp");
+      if (claude) stripParam("claude");
     };
 
     void initialise();
+    const onFocus = () => {
+      if (!window.localStorage.getItem("ucbh-claude-signin")) return;
+      void refreshClaudeStatus().then((ready) => {
+        if (!ready) void confirmDemoClaudeSignIn();
+      });
+    };
+    window.addEventListener("focus", onFocus);
     return () => {
       cancelled = true;
+      window.removeEventListener("focus", onFocus);
     };
-    // Runs once on mount: the query string is the OAuth callback signal.
+    // Runs once on mount: the query strings are OAuth callback signals.
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    try {
+      const stored = window.localStorage.getItem("ucbh-qb-permission");
+      if (!stored) return;
+      const parsed = JSON.parse(stored) as string[];
+      const valid = parsed.filter((item): item is PermissionKey =>
+        PERMISSION_OPTIONS.some((option) => option.key === item),
+      );
+      if (valid.length) {
+        setPermissionScopes(valid);
+        setPermissionGranted(true);
+      }
+    } catch {
+      window.localStorage.removeItem("ucbh-qb-permission");
+    }
   }, []);
 
   useEffect(() => {
@@ -968,6 +1179,8 @@ export default function WorkspaceClient({
 
   const resetTask = () => {
     setStage("task");
+    setTaskView("setup");
+    setTaskTab("mcp");
     setPrompt(agent.prompts[0] || "");
     setFiles([]);
     setMessages([]);
@@ -980,6 +1193,8 @@ export default function WorkspaceClient({
     setQbImported(false);
     setQbDataError("");
     setQbDataWarning("");
+    setPermissionGranted(false);
+    window.localStorage.removeItem("ucbh-qb-permission");
     qbAutoImportRef.current = false;
     setRunProgress(0);
     setActiveSessionId(createSessionId());
@@ -1466,7 +1681,7 @@ export default function WorkspaceClient({
               </h1>
               <p className="mt-2 max-w-2xl text-[13px] leading-relaxed text-muted-foreground">
                 {stage === "task"
-                  ? "Add one or more data files and describe the work you want the agent to do."
+                  ? "Connect Claude and your QuickBooks MCP, choose the agent's permissions, then prepare files and a prompt."
                   : stage === "running"
                     ? "Agent AI is executing your task inside a temporary sandbox. Follow the pipeline and live trace below."
                     : "Your prompt and files are sent to Agent AI only after you confirm the payment."}
@@ -1524,7 +1739,7 @@ export default function WorkspaceClient({
             )}
 
             {stage === "task" && (
-              <div className="space-y-4">
+              <div className="space-y-5">
                 <div className="bai-card overflow-hidden">
                   <div className="flex flex-wrap items-start justify-between gap-4 border-b border-ink/8 p-5 md:p-6">
                     <div className="flex items-start gap-4">
@@ -1563,325 +1778,424 @@ export default function WorkspaceClient({
                     ))}
                   </div>
                 </div>
-                <div className="grid gap-4 xl:grid-cols-[0.9fr_1.1fr]">
-                  <div className="bai-card p-5 max-h-[630px] overflow-y-auto pr-2">
-                    {/* <div className="flex items-center justify-between">
-                      <div>
-                        <p className="label">Task files</p>
-                        <p className="mt-1 text-[11px] text-muted-foreground">
-                          CSV · up to {MAX_TASK_FILES} files,{" "}
-                          {Math.round(MAX_TASK_TOTAL_BYTES / 1_000_000)} MB
-                          total
-                        </p>
-                      </div>
-                      <UploadCloud className="h-5 w-5 text-primary" />
-                    </div>
-                    <label className="mt-4 flex cursor-pointer flex-col items-center rounded-2xl border border-dashed border-ink/20 bg-paper/60 px-5 py-8 text-center transition-colors hover:border-primary/40 hover:bg-primary/[0.03]">
-                      <UploadCloud className="h-6 w-6 text-primary" />
-                      <span className="mt-2 text-xs font-semibold">
-                        Drop files here or browse
-                      </span>
-                      <span className="mt-1 text-[10px] text-muted-foreground">
-                        CSV files, {Math.round(MAX_TASK_FILE_BYTES / 1_000_000)}{" "}
-                        MB maximum each
-                      </span>
-                      <input
-                        className="sr-only"
-                        type="file"
-                        multiple
-                        accept=".csv,text/csv"
-                        onChange={(event) => void addFiles(event.target.files)}
-                      />
-                    </label>
-                    {files.length > 0 && (
-                      <ul className="mt-3 space-y-2">
-                        {files.map((file, index) => (
-                          <li
-                            key={`${file.name}-${index}`}
-                            className="flex items-center gap-2 rounded-lg border border-ink/8 px-2.5 py-2"
-                          >
-                            <FileText className="h-3.5 w-3.5 text-primary" />
-                            <span className="min-w-0 flex-1 truncate text-[11px]">
-                              {file.name}
-                            </span>
-                            <span className="font-mono text-[9px] text-muted-foreground">
-                              {(file.size / 1024).toFixed(0)} KB
-                            </span>
-                            <button
-                              type="button"
-                              aria-label={`Remove ${file.name}`}
-                              onClick={() =>
-                                setFiles((items) =>
-                                  items.filter((_, i) => i !== index),
-                                )
-                              }
-                            >
-                              <X className="h-3.5 w-3.5 text-muted-foreground" />
-                            </button>
-                          </li>
-                        ))}
-                      </ul>
-                    )}
 
-                    <div className="relative mt-5 mb-1">
-                      <div className="absolute inset-0 flex items-center">
-                        <div className="w-full border-t border-ink/10" />
-                      </div>
-                      <div className="relative flex justify-center">
-                        <span className="bg-white px-3 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-                          or import from
-                        </span>
-                      </div>
-                    </div>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (qbConnected) {
-                          setQbDialogOpen(true);
-                        } else {
-                          void connectQuickBooks();
-                        }
-                      }}
-                      disabled={qbConnecting || qbChecking}
-                      className={`mt-3 flex w-full items-center justify-center gap-2.5 rounded-xl border px-4 py-3 text-xs font-semibold transition-all duration-200 disabled:cursor-wait disabled:opacity-70 ${
-                        qbConnected
-                          ? "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
-                          : "border-ink/15 bg-white text-ink hover:border-[#2CA01C]/40 hover:bg-[#2CA01C]/[0.04] hover:shadow-sm"
-                      }`}
-                    >
-                      <svg
-                        width="20"
-                        height="20"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        xmlns="http://www.w3.org/2000/svg"
-                      >
-                        <circle cx="12" cy="12" r="11" fill="#2CA01C" />
-                        <path
-                          d="M7.5 7.5C6.12 7.5 5 8.62 5 10v4c0 1.38 1.12 2.5 2.5 2.5H9v-1.5H7.5c-.55 0-1-.45-1-1v-4c0-.55.45-1 1-1H9V14.5c0 1.38 1.12 2.5 2.5 2.5V7.5H7.5z"
-                          fill="white"
-                        />
-                        <path
-                          d="M16.5 16.5c1.38 0 2.5-1.12 2.5-2.5v-4c0-1.38-1.12-2.5-2.5-2.5H15v1.5h1.5c.55 0 1 .45 1 1v4c0 .55-.45 1-1 1H15V9.5c0-1.38-1.12-2.5-2.5-2.5v9.5h4z"
-                          fill="white"
-                        />
-                      </svg>
-                      {qbConnecting ? (
-                        <>
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                          Redirecting to Intuit…
-                        </>
-                      ) : qbConnected ? (
-                        <>
-                          {qbCompanyName
-                            ? `Connected · ${qbCompanyName}`
-                            : "Connected to QuickBooks"}
-                          <CheckCircle2 className="h-4 w-4 text-emerald-600" />
-                        </>
-                      ) : qbChecking ? (
-                        <>
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                          Checking QuickBooks…
-                        </>
-                      ) : (
-                        "Connect with QuickBooks"
-                      )}
-                    </button>
-                    {qbError && !qbDialogOpen && (
-                      <p className="mt-2 text-[10.5px] leading-relaxed text-red-600">
-                        {qbError}
-                      </p>
-                    )}
-                    {qbConnected && (
-                      <div className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50/70 p-3">
-                        <div className="flex flex-wrap items-center justify-between gap-2">
-                          <p className="text-[10.5px] font-semibold text-emerald-800">
-                            {qbCompanyName || "QuickBooks company"}
-                            {qbRealmId ? ` · ${qbRealmId}` : ""}
-                          </p>
-                          <button
-                            type="button"
-                            onClick={() => setQbDialogOpen(true)}
-                            className="text-[10px] font-medium text-emerald-700 underline underline-offset-2 hover:text-emerald-900"
-                          >
-                            Manage
-                          </button>
-                        </div>
-                        <p className="mt-1 text-[10px] leading-relaxed text-emerald-700/80">
-                          {qbDataLoading
-                            ? "Reading your QuickBooks data…"
-                            : qbImported
-                              ? "QuickBooks records are part of this task."
-                              : "Import customers, vendors, employees and invoices into this task."}
-                        </p>
-                        {qbSummary && (
-                          <div className="mt-1.5 space-y-1">
-                            <p className="font-mono text-[9.5px] leading-relaxed text-emerald-800/80">
-                              {qbSummary.records} records · {qbSummary.files}{" "}
-                              files
-                            </p>
-                            {qbSummary.entities.length > 0 && (
-                              <p className="text-[9.5px] leading-relaxed text-emerald-800/70">
-                                {qbSummary.entities
-                                  .map(
-                                    (entity) =>
-                                      `${entity.label}: ${entity.count}`,
-                                  )
-                                  .join(" · ")}
-                              </p>
-                            )}
-                          </div>
-                        )}
-                        {qbDataWarning && (
-                          <p className="mt-1.5 text-[10px] leading-relaxed text-amber-700">
-                            {qbDataWarning}
-                          </p>
-                        )}
-                        {qbDataError && (
-                          <p className="mt-1.5 text-[10px] leading-relaxed text-red-600">
-                            {qbDataError}
-                          </p>
-                        )}
-                        <div className="mt-2 flex flex-wrap gap-2">
-                          <button
-                            type="button"
-                            onClick={() => void importQuickBooksData()}
-                            disabled={qbDataLoading}
-                            className="rounded-lg bg-[#2CA01C] px-2.5 py-1.5 text-[10px] font-semibold text-white transition hover:bg-[#248B17] disabled:opacity-60"
-                          >
-                            {qbImported
-                              ? "Refresh imported data"
-                              : "Import data"}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => void disconnectQuickBooks()}
-                            disabled={qbDataLoading}
-                            className="rounded-lg border border-emerald-300 bg-white px-2.5 py-1.5 text-[10px] font-semibold text-emerald-800 transition hover:bg-emerald-50 disabled:opacity-60"
-                          >
-                            Disconnect
-                          </button>
-                        </div>
-                      </div>
-                    )}
-
-                    <div className="relative mt-5 mb-1">
-                      <div className="absolute inset-0 flex items-center">
-                        <div className="w-full border-t border-ink/10" />
-                      </div>
-                      <div className="relative flex justify-center">
-                        <span className="bg-white px-3 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-                          or
-                        </span>
-                      </div>
-                    </div> */}
-
-                    <div className="mt-3">
-                      <div className="flex items-start gap-3">
-                        <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary">
-                          <Bot className="h-4 w-4" />
-                        </span>
-                        <div className="min-w-0">
-                          <p className="text-xs font-semibold">MCP Connector</p>
-                          <p className="mt-1 text-[10.5px] leading-relaxed text-muted-foreground">
-                            Chat with AI about your QuickBooks company through
-                            our secure MCP server.
-                          </p>
-                        </div>
-                      </div>
+                {taskView === "setup" ? (
+                  <>
+                    <div className="bai-card flex flex-wrap gap-1.5 p-1.5">
                       <button
                         type="button"
-                        onClick={() => void connectMcp()}
-                        disabled={mcpConnecting || mcpConnected}
-                        className={`mt-3 flex w-full items-center justify-center gap-2.5 rounded-xl border px-4 py-3 text-xs font-semibold transition-all duration-200 disabled:cursor-not-allowed disabled:opacity-70 ${
-                          mcpConnected
-                            ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                            : "border-ink/15 bg-white text-ink hover:border-[#2CA01C]/40 hover:bg-[#2CA01C]/[0.04] hover:shadow-sm"
+                        role="tab"
+                        aria-selected={taskTab === "mcp"}
+                        onClick={() => setTaskTab("mcp")}
+                        className={`flex flex-1 items-center justify-center gap-2 rounded-xl px-4 py-3 text-xs font-semibold transition-all ${
+                          taskTab === "mcp"
+                            ? "bg-primary text-white shadow-sm"
+                            : "text-muted-foreground hover:bg-paper hover:text-ink"
                         }`}
                       >
-                        <Bot className="h-5 w-5 text-primary" />
-                        {mcpConnecting ? (
-                          <>
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                            Connecting to QuickBooks…
-                          </>
-                        ) : mcpConnected ? (
-                          <>
-                            MCP Connected
-                            <CheckCircle2 className="h-4 w-4 text-emerald-600" />
-                          </>
-                        ) : (
-                          <>
-                            Connect MCP
-                            <ArrowRight className="h-4 w-4" />
-                          </>
+                        <Bot className="h-4 w-4" />
+                        MCP Connections
+                        {claudeConnected && mcpConnected && (
+                          <CheckCircle2 className="h-3.5 w-3.5" />
                         )}
                       </button>
-                      {mcpConnected && (
-                        <div className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50/70 p-3">
-                          <p className="text-[10.5px] font-semibold text-emerald-800">
-                            {mcpNotice || "MCP connected successfully."}
-                          </p>
-                        </div>
-                      )}
+                      <button
+                        type="button"
+                        role="tab"
+                        aria-selected={taskTab === "upload"}
+                        onClick={() => setTaskTab("upload")}
+                        className={`flex flex-1 items-center justify-center gap-2 rounded-xl px-4 py-3 text-xs font-semibold transition-all ${
+                          taskTab === "upload"
+                            ? "bg-primary text-white shadow-sm"
+                            : "text-muted-foreground hover:bg-paper hover:text-ink"
+                        }`}
+                      >
+                        <UploadCloud className="h-4 w-4" />
+                        Upload Files
+                        {files.length > 0 && (
+                          <span className="rounded-full bg-white/20 px-1.5 py-0.5 font-mono text-[9px]">
+                            {files.length}
+                          </span>
+                        )}
+                      </button>
+                    </div>
 
-                      {mcpConnected && (
-                        <div className="mt-3">
-                          <div className="flex flex-wrap gap-2">
-                            <button
-                              type="button"
-                              onClick={() => void disconnectQuickBooks()}
-                              disabled={qbDataLoading}
-                              className="rounded-lg border border-emerald-300 bg-white px-2.5 py-1.5 text-[10px] font-semibold text-emerald-800 transition hover:bg-emerald-50 disabled:opacity-60"
+                    {taskTab === "mcp" ? (
+                      <div className="space-y-4 anim-in">
+                        <div className="bai-card p-5 md:p-6">
+                          <div className="flex flex-wrap items-start justify-between gap-3">
+                            <div>
+                              <p className="label">Connection checklist</p>
+                              <h2 className="mt-2 font-display text-xl font-bold">
+                                Connect your own accounts
+                              </h2>
+                              <p className="mt-1 max-w-xl text-[11px] leading-relaxed text-muted-foreground">
+                                Sign in to Claude, link the QuickBooks MCP
+                                connection, then choose what the agent may do.
+                                Each step belongs to this browser session.
+                              </p>
+                            </div>
+                            <span className="chip">
+                              {[claudeConnected, mcpConnected, permissionGranted].filter(
+                                Boolean,
+                              ).length}
+                              /3 complete
+                            </span>
+                          </div>
+
+                          <div className="mt-5 grid gap-3 lg:grid-cols-3">
+                            <div
+                              className={`rounded-2xl border p-4 ${claudeConnected ? "border-emerald-200 bg-emerald-50/60" : "border-ink/10 bg-paper/60"}`}
                             >
-                              Disconnect
-                            </button>
+                              <div className="flex items-center justify-between">
+                                <span className="grid h-9 w-9 place-items-center rounded-xl bg-primary/10 text-primary">
+                                  <Bot className="h-4 w-4" />
+                                </span>
+                                <span
+                                  className={`font-mono text-[9px] uppercase tracking-wide ${claudeConnected ? "text-emerald-700" : "text-muted-foreground"}`}
+                                >
+                                  {claudeConnected ? "Connected" : "Step 01"}
+                                </span>
+                              </div>
+                              <p className="mt-3 text-xs font-semibold">
+                                Claude account
+                              </p>
+                              <p className="mt-1 text-[10.5px] leading-relaxed text-muted-foreground">
+                                You are redirected to Claude to sign in to your
+                                own account before anything is connected.
+                              </p>
+                              <button
+                                type="button"
+                                onClick={() => void connectClaude()}
+                                disabled={claudeConnecting || claudeConnected}
+                                className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-3 py-2 text-[11px] font-semibold text-white transition hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
+                              >
+                                {claudeConnecting ? (
+                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                ) : claudeConnected ? (
+                                  <CheckCircle2 className="h-3.5 w-3.5" />
+                                ) : (
+                                  <ArrowRight className="h-3.5 w-3.5" />
+                                )}
+                                {claudeConnected
+                                  ? "Claude signed in"
+                                  : "Sign in to Claude"}
+                              </button>
+                              {claudeConnected && (
+                                <div className="mt-2 flex items-center justify-between gap-2">
+                                  <span className="truncate font-mono text-[9px] text-emerald-700">
+                                    {claudeMode === "oauth"
+                                      ? "OAuth account"
+                                      : "Browser session"}
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      void fetch("/api/claude/status", {
+                                        method: "DELETE",
+                                      }).then(() => {
+                                        setClaudeConnected(false);
+                                        setClaudeMode(null);
+                                        setPermissionGranted(false);
+                                        window.localStorage.removeItem(
+                                          "ucbh-qb-permission",
+                                        );
+                                      });
+                                    }}
+                                    className="text-[9px] font-medium text-muted-foreground underline underline-offset-2 hover:text-ink"
+                                  >
+                                    Sign out
+                                  </button>
+                                </div>
+                              )}
+                              {claudeError && (
+                                <p className="mt-2 flex items-start gap-1.5 text-[10px] leading-relaxed text-red-600">
+                                  <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
+                                  {claudeError}
+                                </p>
+                              )}
+                            </div>
+
+                            <div
+                              className={`rounded-2xl border p-4 ${mcpConnected ? "border-emerald-200 bg-emerald-50/60" : "border-ink/10 bg-paper/60"}`}
+                            >
+                              <div className="flex items-center justify-between">
+                                <span className="grid h-9 w-9 place-items-center rounded-xl bg-[#2CA01C]/10 text-[#1F7A14]">
+                                  <DatabaseZap className="h-4 w-4" />
+                                </span>
+                                <span
+                                  className={`font-mono text-[9px] uppercase tracking-wide ${mcpConnected ? "text-emerald-700" : "text-muted-foreground"}`}
+                                >
+                                  {mcpConnected ? "Connected" : "Step 02"}
+                                </span>
+                              </div>
+                              <p className="mt-3 text-xs font-semibold">
+                                MCP connection
+                              </p>
+                              <p className="mt-1 text-[10.5px] leading-relaxed text-muted-foreground">
+                                Link the secure MCP server to your QuickBooks
+                                company so the agent can read the approved data.
+                              </p>
+                              <button
+                                type="button"
+                                onClick={() => void connectMcp()}
+                                disabled={mcpConnecting || mcpConnected}
+                                className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-ink/15 bg-white px-3 py-2 text-[11px] font-semibold transition hover:border-primary/30 hover:shadow-sm disabled:cursor-not-allowed disabled:opacity-60"
+                              >
+                                {mcpConnecting ? (
+                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                ) : mcpConnected ? (
+                                  <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
+                                ) : (
+                                  <ArrowRight className="h-3.5 w-3.5" />
+                                )}
+                                {mcpConnected
+                                  ? "MCP connected"
+                                  : mcpConnecting
+                                    ? "Connecting…"
+                                    : "Connect MCP"}
+                              </button>
+                              {mcpConnected && (
+                                <p className="mt-2 truncate text-[9.5px] text-emerald-700">
+                                  {mcpNotice || qbCompanyName || "MCP connected successfully."}
+                                </p>
+                              )}
+                              {mcpError && (
+                                <p className="mt-2 flex items-start gap-1.5 text-[10px] leading-relaxed text-red-600">
+                                  <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
+                                  {mcpError}
+                                </p>
+                              )}
+                            </div>
+
+                            <div
+                              className={`rounded-2xl border p-4 ${permissionGranted ? "border-emerald-200 bg-emerald-50/60" : "border-ink/10 bg-paper/60"}`}
+                            >
+                              <div className="flex items-center justify-between">
+                                <span className="grid h-9 w-9 place-items-center rounded-xl bg-amber-100 text-amber-800">
+                                  <ShieldCheck className="h-4 w-4" />
+                                </span>
+                                <span
+                                  className={`font-mono text-[9px] uppercase tracking-wide ${permissionGranted ? "text-emerald-700" : "text-muted-foreground"}`}
+                                >
+                                  {permissionGranted ? "Approved" : "Step 03"}
+                                </span>
+                              </div>
+                              <p className="mt-3 text-xs font-semibold">
+                                QuickBooks permission
+                              </p>
+                              <p className="mt-1 text-[10.5px] leading-relaxed text-muted-foreground">
+                                Decide what the agent is allowed to do in
+                                QuickBooks Online before you continue.
+                              </p>
+                              <button
+                                type="button"
+                                onClick={() => setPermissionOpen(true)}
+                                disabled={!claudeConnected || !mcpConnected}
+                                className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-ink/15 bg-white px-3 py-2 text-[11px] font-semibold transition hover:border-primary/30 hover:shadow-sm disabled:cursor-not-allowed disabled:opacity-50"
+                              >
+                                {permissionGranted ? (
+                                  <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
+                                ) : (
+                                  <LockKeyhole className="h-3.5 w-3.5" />
+                                )}
+                                {permissionGranted
+                                  ? "Review permission"
+                                  : "Choose permission"}
+                              </button>
+                              {permissionGranted && (
+                                <p className="mt-2 truncate text-[9.5px] text-emerald-700">
+                                  {permissionScopes
+                                    .map(
+                                      (key) =>
+                                        PERMISSION_OPTIONS.find(
+                                          (option) => option.key === key,
+                                        )?.title,
+                                    )
+                                    .filter(Boolean)
+                                    .join(" · ")}
+                                </p>
+                              )}
+                            </div>
                           </div>
                         </div>
-                      )}
-                      {mcpError && (
-                        <p className="mt-2 flex items-start gap-1.5 text-[10px] leading-relaxed text-red-700">
-                          <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
-                          {mcpError}
-                        </p>
-                      )}
+                      </div>
+                    ) : (
+                      <div className="grid gap-4 anim-in xl:grid-cols-[1.1fr_0.9fr]">
+                        <div className="bai-card p-5 md:p-6">
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <p className="label">Task files</p>
+                              <h2 className="mt-2 font-display text-xl font-bold">
+                                Upload your data
+                              </h2>
+                              <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
+                                CSV files · up to {MAX_TASK_FILES} files,{" "}
+                                {Math.round(MAX_TASK_TOTAL_BYTES / 1_000_000)} MB
+                                total
+                              </p>
+                            </div>
+                            <UploadCloud className="h-5 w-5 text-primary" />
+                          </div>
+                          <label className="mt-4 flex cursor-pointer flex-col items-center rounded-2xl border border-dashed border-ink/20 bg-paper/60 px-5 py-10 text-center transition-colors hover:border-primary/40 hover:bg-primary/[0.03]">
+                            <UploadCloud className="h-7 w-7 text-primary" />
+                            <span className="mt-3 text-xs font-semibold">
+                              Drop files here or browse
+                            </span>
+                            <span className="mt-1 text-[10px] text-muted-foreground">
+                              CSV files, {Math.round(MAX_TASK_FILE_BYTES / 1_000_000)} MB
+                              maximum each
+                            </span>
+                            <input
+                              className="sr-only"
+                              type="file"
+                              multiple
+                              accept=".csv,text/csv"
+                              onChange={(event) => void addFiles(event.target.files)}
+                            />
+                          </label>
+                          {files.length > 0 ? (
+                            <ul className="mt-4 max-h-64 space-y-2 overflow-y-auto pr-1">
+                              {files.map((file, index) => (
+                                <li
+                                  key={`${file.name}-${index}`}
+                                  className="flex items-center gap-2 rounded-lg border border-ink/8 px-2.5 py-2"
+                                >
+                                  <FileText className="h-3.5 w-3.5 text-primary" />
+                                  <span className="min-w-0 flex-1 truncate text-[11px]">
+                                    {file.name}
+                                  </span>
+                                  <span className="font-mono text-[9px] text-muted-foreground">
+                                    {(file.size / 1024).toFixed(0)} KB
+                                  </span>
+                                  <button
+                                    type="button"
+                                    aria-label={`Remove ${file.name}`}
+                                    onClick={() =>
+                                      setFiles((items) =>
+                                        items.filter((_, i) => i !== index),
+                                      )
+                                    }
+                                  >
+                                    <X className="h-3.5 w-3.5 text-muted-foreground" />
+                                  </button>
+                                </li>
+                              ))}
+                            </ul>
+                          ) : (
+                            <p className="mt-4 rounded-xl border border-dashed border-ink/10 px-3 py-3 text-center text-[10.5px] text-muted-foreground">
+                              No files uploaded yet.
+                            </p>
+                          )}
+                        </div>
+
+                        <div className="bai-card overflow-hidden">
+                          <div className="border-b border-ink/8 px-5 py-4">
+                            <p className="label">Instructions</p>
+                            <h3 className="mt-2 font-display text-base font-bold">
+                              Read-only mode
+                            </h3>
+                          </div>
+                          <div className="p-4">
+                            <ol className="mt-4 space-y-2.5">
+                              {[
+                                "A file gives Claude something to reason over, but no tools to call. Link QuickBooks MCP and Claude Cowork when the client wants the work happening inside QuickBooks Online.",
+                                "No write tools, no approval queue for changes",
+                                "The pack still returns findings and a full set of actions",
+                              ].map((item, index) => (
+                                <li
+                                  key={item}
+                                  className="flex items-start gap-2.5 text-[11px] leading-relaxed text-muted-foreground"
+                                >
+                                  <span className="grid h-5 w-5 shrink-0 place-items-center rounded-full bg-primary/10 font-mono text-[9px] font-semibold text-primary">
+                                    {index + 1}
+                                  </span>
+                                  {item}
+                                </li>
+                              ))}
+                            </ol>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="bai-card flex flex-wrap items-center justify-between gap-4 p-4 md:p-5">
+                      <div className="flex flex-wrap items-center gap-2 text-[10px]">
+                        <span className="chip">
+                          <Bot className="h-3 w-3" />
+                          Claude {claudeConnected ? "ready" : "pending"}
+                        </span>
+                        <span className="chip">
+                          <DatabaseZap className="h-3 w-3" />
+                          MCP {mcpConnected ? "ready" : "pending"}
+                        </span>
+                        <span className="chip">
+                          <ShieldCheck className="h-3 w-3" />
+                          Permission {permissionGranted ? "set" : "pending"}
+                        </span>
+                        <span className="chip">
+                          <FileText className="h-3 w-3" />
+                          {files.length} file{files.length === 1 ? "" : "s"}
+                        </span>
+                      </div>
+                      <Button
+                        disabled={!setupComplete}
+                        onClick={() => {
+                          setError("");
+                          setTaskView("prompt");
+                        }}
+                      >
+                        Continue to the prompt
+                        <ArrowRight className="h-3.5 w-3.5" />
+                      </Button>
                     </div>
-                  </div>
-                  <div className="bai-card p-5">
-                    <p className="label">Task prompt</p>
-                    <p className="mt-1 text-[11px] text-muted-foreground">
-                      Write instructions or paste a task brief for {agent.name}.
-                    </p>
+                  </>
+                ) : (
+                  <div className="bai-card p-5 anim-in md:p-6">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <p className="label">Final step · task prompt</p>
+                        <h2 className="mt-2 font-display text-xl font-bold">
+                          What should {agent.name} do?
+                        </h2>
+                        <p className="mt-1 max-w-xl text-[11px] leading-relaxed text-muted-foreground">
+                          Describe the outcome you need. Your connections,
+                          permission and files are already prepared.
+                        </p>
+                      </div>
+                      <Button
+                        variant="line"
+                        size="sm"
+                        onClick={() => setTaskView("setup")}
+                      >
+                        <ArrowLeft className="h-3.5 w-3.5" />
+                        Back to setup
+                      </Button>
+                    </div>
                     <textarea
-                      className="mt-4 min-h-[190px] w-full resize-y rounded-xl border border-ink/12 bg-white/80 p-3.5 text-[12px] leading-relaxed outline-none transition focus:border-primary/40 focus:ring-2 focus:ring-primary/10"
+                      className="mt-5 min-h-[240px] w-full resize-y rounded-xl border border-ink/12 bg-white/80 p-3.5 text-[12px] leading-relaxed outline-none transition focus:border-primary/40 focus:ring-2 focus:ring-primary/10"
                       placeholder="Describe the outcome you need…"
                       value={prompt}
                       maxLength={20000}
                       onChange={(event) => setPrompt(event.target.value)}
                     />
-                    <p className="mt-2 text-right font-mono text-[9px] text-muted-foreground">
-                      {prompt.length.toLocaleString()} / 20,000
-                    </p>
+                    <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+                      <p className="font-mono text-[9px] text-muted-foreground">
+                        {prompt.length.toLocaleString()} / 20,000
+                      </p>
+                      <Button
+                        disabled={!prompt.trim()}
+                        onClick={() => {
+                          setError("");
+                          setStage("runtime");
+                        }}
+                      >
+                        Continue
+                        <ArrowRight className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
                   </div>
-                </div>
-                <div className="flex items-center justify-end gap-3">
-                  {/* <p className="text-[10.5px] text-muted-foreground">
-                    Files stay in browser memory until you continue.
-                  </p> */}
-                  <Button
-                    disabled={
-                      (!files.length && !mcpConnected) || !prompt.trim()
-                    }
-                    onClick={() => {
-                      setError("");
-                      setStage("runtime");
-                    }}
-                  >
-                    Continue
-                    <ArrowRight className="h-3.5 w-3.5" />
-                  </Button>
-                </div>
+                )}
               </div>
             )}
 
@@ -2666,6 +2980,60 @@ export default function WorkspaceClient({
               </div>
             )}
           </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={permissionOpen} onOpenChange={setPermissionOpen}>
+        <DialogContent className="max-h-[88vh] overflow-y-auto rounded-2xl sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="font-display text-xl">
+              What may the agent do in QuickBooks Online?
+            </DialogTitle>
+            <DialogDescription>
+              Choose the actions this browser session allows. You can change
+              them again before you continue to the prompt.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            {PERMISSION_OPTIONS.map((option) => {
+              const checked = permissionScopes.includes(option.key);
+              return (
+                <label
+                  key={option.key}
+                  className={`flex cursor-pointer items-start gap-3 rounded-xl border p-3 transition ${checked ? "border-primary/40 bg-primary/[0.04]" : "border-ink/10 bg-white hover:border-primary/25"}`}
+                >
+                  <input
+                    type="checkbox"
+                    className="mt-0.5 h-4 w-4 accent-[hsl(var(--primary))]"
+                    checked={checked}
+                    onChange={() => togglePermission(option.key)}
+                  />
+                  <span>
+                    <span className="block text-[11.5px] font-semibold">
+                      {option.title}
+                    </span>
+                    <span className="mt-0.5 block text-[10px] leading-relaxed text-muted-foreground">
+                      {option.detail}
+                    </span>
+                  </span>
+                </label>
+              );
+            })}
+          </div>
+          <div className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-[10px] leading-relaxed text-amber-800">
+            <ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            Write actions are proposed for your review first. QuickBooks only
+            changes when you explicitly approve the write-back.
+          </div>
+          <DialogFooter>
+            <Button variant="line" onClick={() => setPermissionOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={grantPermission}>
+              <Check className="h-3.5 w-3.5" />
+              Allow selected actions
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 

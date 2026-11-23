@@ -64,7 +64,12 @@ The review screen shows every proposed operation. Pushing sends `POST /api/quick
 
 ## MCP Connector
 
-The Prepare your task screen also offers **MCP Connector**: connect QuickBooks inline, confirm the MCP connection, then continue the normal task flow (environment selection, estimate, and agent run). Claude reads the connected QuickBooks company through a shared HTTP MCP server. It works without registration or login.
+The Prepare your task screen has two tabs:
+
+- **MCP Connections** — a guided checklist: sign in to your own Claude account, connect the QuickBooks MCP server, then approve what the agent may do in QuickBooks Online. Visual guides are served from `/api/guide-images/<name>` using the PNG files in the project-root `image/` folder, so replacing a file there is reflected on refresh.
+- **Upload Files** — upload CSV data on the left with preparation instructions and the guide image on the right.
+
+After Claude, the MCP connection and permissions are ready, **Continue to the prompt** reveals the prompt textarea. The remaining flow is unchanged (environment selection, estimate, and agent run).
 
 ### Setup
 
@@ -74,6 +79,16 @@ Copy `.env.example` and add:
 TOKEN_ENCRYPTION_KEY=<base64 output of: openssl rand -base64 32>
 MCP_SIGNING_SECRET=<random string of at least 32 characters>
 ```
+
+For a real per-browser Claude sign-in redirect, add a Claude OAuth app and configure:
+
+```bash
+CLAUDE_CLIENT_ID=<your Claude OAuth client ID>
+CLAUDE_CLIENT_SECRET=<your Claude OAuth client secret>
+CLAUDE_OAUTH_REDIRECT_URI=http://localhost:3000/api/claude/callback
+```
+
+`/api/claude/auth` creates a PKCE challenge and signed state bound to the browser session; `/api/claude/callback` exchanges the code and stores only the profile (user id and email) in the MCP store. Without OAuth credentials the workspace falls back to a guided demo sign-in: the browser is redirected to `CLAUDE_LOGIN_URL` (default `https://claude.ai/login`) and the sign-in is confirmed when the user returns.
 
 No second Intuit app registration is needed. MCP Connector reuses the existing QuickBooks login and the already-configured `QB_REDIRECT_URI` / `/api/quickbooks/callback` route. If QuickBooks is not connected yet, clicking the connector starts that same login flow and returns to the connector with the company connection ready.
 

@@ -75,6 +75,26 @@ export type AuditDoc = {
   created_at: Date;
 };
 
+export type ClaudeAuthDoc = {
+  id: string;
+  session_id: string;
+  user_id: string;
+  email: string | null;
+  mode: "oauth" | "demo";
+  created_at: Date;
+  updated_at: Date;
+};
+
+export type ClaudeStateDoc = {
+  id: string;
+  state_hash: string;
+  code_verifier: string;
+  session_id: string;
+  return_to: string;
+  created_at: Date;
+  expires_at: Date;
+};
+
 type Store = {
   sessions: BrowserSessionDoc[];
   states: OAuthStateDoc[];
@@ -82,6 +102,8 @@ type Store = {
   connections: QuickBooksConnectionDoc[];
   pending: PendingOperationDoc[];
   audit: AuditDoc[];
+  claudeAuth: ClaudeAuthDoc[];
+  claudeStates: ClaudeStateDoc[];
 };
 
 declare global {
@@ -110,6 +132,9 @@ function prune(store: Store): void {
   store.states = store.states.filter((item) => item.expires_at.getTime() > now);
   store.tokens = store.tokens.filter((item) => item.expires_at.getTime() > now);
   store.pending = store.pending.filter((item) => item.expires_at.getTime() > now);
+  store.claudeStates = store.claudeStates.filter(
+    (item) => item.expires_at.getTime() > now,
+  );
   store.audit = store.audit
     .filter((item) => now - item.created_at.getTime() < 90 * 24 * 60 * 60 * 1000)
     .slice(-2000);
@@ -128,6 +153,8 @@ async function readStore(): Promise<Store> {
         connections: [],
         pending: [],
         audit: [],
+        claudeAuth: [],
+        claudeStates: [],
       };
     }
     throw error;
@@ -173,6 +200,19 @@ async function readStore(): Promise<Store> {
     audit: (parsed.audit || []).map((item) => ({
       ...(item as unknown as Omit<AuditDoc, "created_at">),
       created_at: asDate(item.created_at),
+    })),
+    claudeAuth: (parsed.claudeAuth || []).map((item) => ({
+      ...(item as unknown as Omit<ClaudeAuthDoc, "created_at" | "updated_at">),
+      created_at: asDate(item.created_at),
+      updated_at: asDate(item.updated_at),
+    })),
+    claudeStates: (parsed.claudeStates || []).map((item) => ({
+      ...(item as unknown as Omit<
+        ClaudeStateDoc,
+        "created_at" | "expires_at"
+      >),
+      created_at: asDate(item.created_at),
+      expires_at: asDate(item.expires_at),
     })),
   };
   prune(store);
@@ -632,4 +672,93 @@ export async function appendAuditLog(input: {
   } catch (error) {
     console.error("MCP audit write failed", error);
   }
+}
+
+export async function createClaudeOAuthState(input: {
+  stateHash: string;
+  codeVerifier: string;
+  sessionHash: string;
+  returnTo: string;
+  ttlSeconds: number;
+}): Promise<void> {
+  await withStore((store) => {
+    store.claudeStates = store.claudeStates.filter(
+      (item) => item.state_hash !== input.stateHash,
+    );
+    const now = new Date();
+    store.claudeStates.push({
+      id: newId(),
+      state_hash: input.stateHash,
+      code_verifier: input.codeVerifier,
+      session_id: input.sessionHash,
+      return_to: input.returnTo,
+      created_at: now,
+      expires_at: new Date(now.getTime() + input.ttlSeconds * 1000),
+    });
+  });
+}
+
+export async function consumeClaudeOAuthState(
+  stateHash: string,
+  sessionHash: string,
+): Promise<ClaudeStateDoc | null> {
+  return withStore((store) => {
+    const index = store.claudeStates.findIndex(
+      (item) =>
+        item.state_hash === stateHash &&
+        item.session_id === sessionHash &&
+        item.expires_at.getTime() > Date.now(),
+    );
+    if (index === -1) return null;
+    return store.claudeStates.splice(index, 1)[0];
+  });
+}
+
+export async function getClaudeAuth(
+  sessionHash: string,
+): Promise<ClaudeAuthDoc | null> {
+  return withStore(
+    (store) =>
+      store.claudeAuth.find((item) => item.session_id === sessionHash) ?? null,
+  );
+}
+
+export async function saveClaudeAuth(input: {
+  sessionHash: string;
+  userId: string;
+  email: string | null;
+  mode: ClaudeAuthDoc["mode"];
+}): Promise<ClaudeAuthDoc> {
+  return withStore((store) => {
+    const now = new Date();
+    let record = store.claudeAuth.find(
+      (item) => item.session_id === input.sessionHash,
+    );
+    if (!record) {
+      record = {
+        id: newId(),
+        session_id: input.sessionHash,
+        user_id: input.userId,
+        email: input.email,
+        mode: input.mode,
+        created_at: now,
+        updated_at: now,
+      };
+      store.claudeAuth.push(record);
+      return record;
+    }
+    record.user_id = input.userId;
+    record.email = input.email;
+    record.mode = input.mode;
+    record.updated_at = now;
+    return record;
+  });
+}
+
+export async function clearClaudeAuth(sessionHash: string): Promise<void> {
+  await withStore((store) => {
+    store.claudeAuth = store.claudeAuth.filter(
+      (item) => item.session_id !== sessionHash,
+    );
+  });
 }
