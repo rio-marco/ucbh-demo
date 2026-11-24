@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import SiteFooter from "@/components/site-footer";
+import KeepAlivePing from "@/components/keep-alive-ping";
 import "./globals.css";
 
 export const viewport: Viewport = {
@@ -32,6 +33,7 @@ export default function RootLayout({
         />
       </head>
       <body className="font-sans antialiased" suppressHydrationWarning>
+        <KeepAlivePing />
         <div className="flex min-h-screen flex-col">
           <div className="flex-1">{children}</div>
           <SiteFooter />
