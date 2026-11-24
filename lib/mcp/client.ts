@@ -3,11 +3,12 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { McpError } from "@/lib/mcp/config";
 import { saveMcpNonce } from "@/lib/mcp/db";
 import { createMcpToken } from "@/lib/mcp/security";
+import { getRuntimeEnv } from "@/lib/runtime-env";
 
 const MCP_PROTOCOL_VERSION = "2025-06-18";
 
 function serverUrl(origin: string): string {
-  const configured = process.env.MCP_SERVER_URL?.trim();
+  const configured = getRuntimeEnv("MCP_SERVER_URL").trim();
   const base = configured || `${origin}/api/mcp`;
   return base.replace(/\/+$/, "");
 }

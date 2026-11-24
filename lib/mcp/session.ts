@@ -19,13 +19,23 @@ export type BrowserSession = {
   raw: string;
   hash: string;
   needsCookie: boolean;
+  secure: boolean;
 };
+
+function requestIsSecure(request: Request): boolean {
+  const forwarded = request.headers
+    .get("x-forwarded-proto")
+    ?.split(",")[0]
+    ?.trim();
+  return (forwarded || new URL(request.url).protocol.replace(":", "")) === "https";
+}
 
 export async function resolveBrowserSession(
   request: Request,
 ): Promise<BrowserSession> {
   const raw = readCookie(request, SESSION_COOKIE);
   const ttl = mcpConfig().sessionTtlSeconds;
+  const secure = requestIsSecure(request);
 
   if (raw && isWellFormedSessionToken(raw)) {
     const hash = hashValue(raw);
@@ -34,16 +44,16 @@ export async function resolveBrowserSession(
       const remaining = existing.expires_at.getTime() - Date.now();
       if (remaining < 7 * 24 * 60 * 60 * 1000) {
         await touchBrowserSession(hash, ttl);
-        return { raw, hash, needsCookie: true };
+        return { raw, hash, needsCookie: true, secure };
       }
-      return { raw, hash, needsCookie: false };
+      return { raw, hash, needsCookie: false, secure };
     }
   }
 
   const fresh = newSessionToken();
   const hash = hashValue(fresh);
   await createBrowserSession(hash, ttl);
-  return { raw: fresh, hash, needsCookie: true };
+  return { raw: fresh, hash, needsCookie: true, secure };
 }
 
 export async function authenticateMcpRequest(

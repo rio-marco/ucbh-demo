@@ -80,7 +80,18 @@ export default function SiteFooter() {
         </div>
 
         <div className="mt-9 flex flex-col gap-3 border-t border-ink/10 pt-5 text-[11px] text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
-          <p>© {year} UCBH. All rights reserved.</p>
+          <div className="flex flex-wrap items-center gap-3">
+            <p>© {year} UCBH. All rights reserved.</p>
+            <Link className="hover:text-foreground" href="/privacy">
+              Privacy
+            </Link>
+            <Link className="hover:text-foreground" href="/eula">
+              EULA
+            </Link>
+            <Link className="hover:text-foreground" href="/disconnect">
+              Disconnect
+            </Link>
+          </div>
           <p className="inline-flex items-center gap-1.5 leading-relaxed">
             <ShieldCheck className="h-3.5 w-3.5 text-primary" />
             Runs are isolated.

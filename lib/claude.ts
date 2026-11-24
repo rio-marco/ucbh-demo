@@ -35,8 +35,8 @@ export function getClaudeConfig(
   credentials?: ClaudeCredentials | null,
 ) {
   return {
-    apiKey: credentials?.apiKey || getRuntimeEnv("CLAUDE_API_KEY"),
-    authToken: credentials?.authToken || getRuntimeEnv("CLAUDE_AUTH_TOKEN"),
+    apiKey: credentials?.apiKey,
+    authToken: credentials?.authToken,
     model: credentials?.model || getRuntimeEnv("CLAUDE_MODEL") || DEFAULT_MODEL,
   };
 }
@@ -44,6 +44,14 @@ export function getClaudeConfig(
 export function claudeIsReady(credentials?: ClaudeCredentials | null): boolean {
   const { apiKey, authToken } = getClaudeConfig(credentials);
   return Boolean(apiKey || authToken);
+}
+
+function getBillingFallback(): ClaudeCredentials {
+  return {
+    apiKey: getRuntimeEnv("CLAUDE_API_KEY") || undefined,
+    authToken: getRuntimeEnv("CLAUDE_AUTH_TOKEN") || undefined,
+    model: getRuntimeEnv("CLAUDE_MODEL") || DEFAULT_MODEL,
+  };
 }
 
 function getModelCandidates(credentials?: ClaudeCredentials | null): string[] {
@@ -252,8 +260,8 @@ export async function callClaude(
     );
   }
 
-  let billsOperatorProfile =
-    credentials?.billingMode === "operator" && Boolean(credentials?.userProfileId);
+  let billsUserProfile = Boolean(credentials?.userProfileId);
+  let usedBillingFallback = false;
   const buildHeaders = () => {
     const headers: Record<string, string> = {
       "content-type": "application/json",
@@ -261,23 +269,16 @@ export async function callClaude(
     };
     if (authToken) {
       headers.authorization = `Bearer ${authToken}`;
-      if (billsOperatorProfile) {
-        headers["anthropic-user-profile-id"] = credentials!.userProfileId!;
+      if (billsUserProfile && credentials?.userProfileId) {
+        headers["anthropic-user-profile-id"] = credentials.userProfileId;
         headers["anthropic-beta"] = CLAUDE_BILLING_BETA;
       }
-    } else {
+    } else if (apiKey) {
       headers["x-api-key"] = apiKey;
     }
     return headers;
   };
 
-  const fallbackToken = getRuntimeEnv("CLAUDE_AUTH_TOKEN");
-  const fallbackEnabled =
-    getRuntimeEnv("CLAUDE_BILLING_FALLBACK").toLowerCase() === "true" &&
-    Boolean(credentials?.authToken) &&
-    Boolean(fallbackToken) &&
-    fallbackToken !== credentials?.authToken;
-  let usedFallback = false;
   let lastFailure = "";
 
   for (const model of getModelCandidates(credentials)) {
@@ -290,7 +291,7 @@ export async function callClaude(
         messages,
         tools: tools ?? TOOLS,
       };
-      if (billsOperatorProfile) {
+      if (billsUserProfile) {
         body.billing_policy = {
           type: "billing_policy",
           bill_to: "user_profile",
@@ -309,25 +310,36 @@ export async function callClaude(
       const details = await response.text().catch(() => "");
       lastFailure = `${model} (${response.status}): ${details.slice(0, 300)}`;
 
-      if (
-        response.status === 403 &&
-        !usedFallback &&
-        fallbackEnabled &&
-        details.includes("user_profile_not_billable")
-      ) {
-        usedFallback = true;
-        ({ apiKey, authToken } = getClaudeConfig({
-          model: credentials?.model,
-          authToken: fallbackToken,
-        }));
-        billsOperatorProfile = false;
-        attempt = -1;
-        continue;
-      }
-
-      if (response.status === 401 || response.status === 403) {
+      if (response.status === 401) {
         throw new Error(
-          `Claude authentication failed (${response.status}): ${details.slice(0, 500)}`,
+          "Your Claude connection expired. Connect your Claude account again.",
+        );
+      }
+      const billingRefused =
+        response.status === 402 ||
+        (response.status === 403 &&
+          details.includes("user_profile_not_billable"));
+      if (billingRefused) {
+        if (billsUserProfile) {
+          billsUserProfile = false;
+          attempt = -1;
+          continue;
+        }
+        if (!usedBillingFallback) {
+          const fallback = getBillingFallback();
+          if (
+            (fallback.apiKey && fallback.apiKey !== apiKey) ||
+            (fallback.authToken && fallback.authToken !== authToken)
+          ) {
+            apiKey = fallback.apiKey;
+            authToken = fallback.authToken;
+            usedBillingFallback = true;
+            attempt = -1;
+            continue;
+          }
+        }
+        throw new Error(
+          "Something went wrong please try again later or contact the administrator",
         );
       }
 

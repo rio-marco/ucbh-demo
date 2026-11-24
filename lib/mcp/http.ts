@@ -13,12 +13,26 @@ export function mcpJson(
 ): Response {
   const response = Response.json(body, { status });
   if (session?.needsCookie) {
-    setCookieHeader(response, sessionCookieHeader(session.raw));
+    setCookieHeader(response, sessionCookieHeader(session.raw, session.secure));
   }
   return response;
 }
 
-export function mcpErrorResponse(error: unknown): Response {
+export function redirectWithSession(
+  url: string,
+  session?: BrowserSession | null,
+): Response {
+  const response = Response.redirect(url);
+  if (session?.needsCookie) {
+    setCookieHeader(response, sessionCookieHeader(session.raw, session.secure));
+  }
+  return response;
+}
+
+export function mcpErrorResponse(
+  error: unknown,
+  session?: BrowserSession | null,
+): Response {
   const code = mcpErrorCode(error);
   const status =
     code === "session_expired"
@@ -28,10 +42,14 @@ export function mcpErrorResponse(error: unknown): Response {
         : code === "claude_error"
           ? 502
           : 400;
-  return Response.json(
+  const response = Response.json(
     { error: mcpErrorMessage(error), code },
     { status },
   );
+  if (session?.needsCookie) {
+    setCookieHeader(response, sessionCookieHeader(session.raw, session.secure));
+  }
+  return response;
 }
 
 export function mcpFriendly(code: Parameters<typeof mcpMessage>[0]): string {

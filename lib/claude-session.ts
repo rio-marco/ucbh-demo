@@ -50,7 +50,7 @@ export async function getClaudeSessionCredentials(
   return {
     authToken: tokens.accessToken,
     model: getClaudeConfig().model,
+    userProfileId: config?.userProfileId,
     connectionId: tokens.connectionId,
-    billingMode: "connection",
   };
 }

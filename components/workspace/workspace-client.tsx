@@ -84,7 +84,8 @@ const CLAUDE_ERROR_MESSAGES: Record<string, string> = {
   access_denied:
     "Claude could not link this app to that organization. The Claude organization that owns the OAuth app cannot link to itself. Sign in with a different eligible organization where you have the Admin or Billing role.",
   invalid_state: "The Claude login session expired. Please try again.",
-  missing_params: "Claude did not return the expected details. Please try again.",
+  missing_params:
+    "Claude did not return the expected details. Please try again.",
   token_exchange: "Claude could not complete the login. Please try again.",
   invalid_scope:
     "Claude rejected the requested scopes. Check CLAUDE_OAUTH_SCOPES and the OAuth app's allowed scopes.",
@@ -96,8 +97,7 @@ const qbErrorMessage = (reason: string | null) =>
   "Could not connect to QuickBooks. Please try again.";
 
 const claudeErrorMessage = (reason: string | null) =>
-  (reason && CLAUDE_ERROR_MESSAGES[reason]) ||
-  "Could not sign in to Claude. Please try again.";
+  (reason && CLAUDE_ERROR_MESSAGES[reason]) || "";
 
 type TaskTab = "mcp" | "upload";
 type TaskView = "setup" | "prompt";
@@ -160,9 +160,7 @@ function PendingQuickBooksOperations({
             </h2>
           </div>
         </div>
-        <span className="chip">
-          {operations.length} pending
-        </span>
+        <span className="chip">{operations.length} pending</span>
       </div>
       <div className="mt-4 space-y-3">
         {operations.map((operation) => (
@@ -695,7 +693,7 @@ export default function WorkspaceClient({
       setMcpConnected(connected);
       if (connected) {
         setMcpError("");
-      } else if (!response.ok && data.error) {
+      } else if (data.error) {
         setMcpError(data.error);
       }
       return connected;
@@ -719,6 +717,7 @@ export default function WorkspaceClient({
         configured?: boolean;
         mode?: "oauth" | null;
         message?: string;
+        reason?: string | null;
         error?: string;
       };
       const connected = Boolean(data.connected);
@@ -728,9 +727,12 @@ export default function WorkspaceClient({
         connected
           ? ""
           : data.error ||
-              (data.configured === false
-                ? data.message || "Claude login is not configured on this server."
-                : ""),
+              (data.reason
+                ? claudeErrorMessage(data.reason)
+                : data.configured === false
+                  ? data.message ||
+                    "Claude login is not configured on this server."
+                  : ""),
       );
       return connected;
     } catch {
@@ -891,8 +893,10 @@ export default function WorkspaceClient({
       setPermissionOpen(false);
       return;
     }
-    if (!permissionScopes.length) {
-      setError("Choose at least one action to allow in QuickBooks Online.");
+    if (!permissionScopes.includes("read")) {
+      setError(
+        "Allow View company data so the agent can read QuickBooks records.",
+      );
       return;
     }
     setError("");
@@ -901,10 +905,7 @@ export default function WorkspaceClient({
       setPermissionScopes(saved);
       setPermissionGranted(true);
       setPermissionOpen(false);
-      window.localStorage.setItem(
-        "ucbh-qb-permission",
-        JSON.stringify(saved),
-      );
+      window.localStorage.setItem("ucbh-qb-permission", JSON.stringify(saved));
     } catch (grantError) {
       setError(
         grantError instanceof Error
@@ -1014,17 +1015,14 @@ export default function WorkspaceClient({
             PERMISSION_OPTIONS.some((option) => option.key === item),
           )
         : [];
-      if (!scopes.length) {
+      if (!scopes.length || !scopes.includes("read")) {
         window.localStorage.removeItem("ucbh-qb-permission");
         setPermissionGranted(false);
         return;
       }
       setPermissionScopes(scopes);
       setPermissionGranted(true);
-      window.localStorage.setItem(
-        "ucbh-qb-permission",
-        JSON.stringify(scopes),
-      );
+      window.localStorage.setItem("ucbh-qb-permission", JSON.stringify(scopes));
     } catch {
       return;
     }
@@ -1098,7 +1096,7 @@ export default function WorkspaceClient({
       const valid = parsed.filter((item): item is PermissionKey =>
         PERMISSION_OPTIONS.some((option) => option.key === item),
       );
-      if (valid.length) {
+      if (valid.includes("read")) {
         setPermissionScopes(valid);
         setPermissionGranted(true);
       }
@@ -1864,9 +1862,13 @@ export default function WorkspaceClient({
                               </p>
                             </div>
                             <span className="chip">
-                              {[claudeConnected, mcpConnected, permissionGranted].filter(
-                                Boolean,
-                              ).length}
+                              {
+                                [
+                                  claudeConnected,
+                                  mcpConnected,
+                                  permissionGranted,
+                                ].filter(Boolean).length
+                              }
                               /3 complete
                             </span>
                           </div>
@@ -1976,7 +1978,9 @@ export default function WorkspaceClient({
                               )}
                               {mcpConnected && (
                                 <p className="mt-2 truncate text-[9.5px] text-emerald-700">
-                                  {mcpNotice || qbCompanyName || "MCP connected successfully."}
+                                  {mcpNotice ||
+                                    qbCompanyName ||
+                                    "MCP connected successfully."}
                                 </p>
                               )}
                               {mcpError && (
@@ -2088,8 +2092,8 @@ export default function WorkspaceClient({
                               </h2>
                               <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
                                 CSV files · up to {MAX_TASK_FILES} files,{" "}
-                                {Math.round(MAX_TASK_TOTAL_BYTES / 1_000_000)} MB
-                                total
+                                {Math.round(MAX_TASK_TOTAL_BYTES / 1_000_000)}{" "}
+                                MB total
                               </p>
                             </div>
                             <UploadCloud className="h-5 w-5 text-primary" />
@@ -2100,7 +2104,8 @@ export default function WorkspaceClient({
                               Drop files here or browse
                             </span>
                             <span className="mt-1 text-[10px] text-muted-foreground">
-                              CSV files, {Math.round(MAX_TASK_FILE_BYTES / 1_000_000)} MB
+                              CSV files,{" "}
+                              {Math.round(MAX_TASK_FILE_BYTES / 1_000_000)} MB
                               maximum each
                             </span>
                             <input
@@ -2108,7 +2113,9 @@ export default function WorkspaceClient({
                               type="file"
                               multiple
                               accept=".csv,text/csv"
-                              onChange={(event) => void addFiles(event.target.files)}
+                              onChange={(event) =>
+                                void addFiles(event.target.files)
+                              }
                             />
                           </label>
                           {files.length > 0 ? (
@@ -2412,185 +2419,192 @@ export default function WorkspaceClient({
               <>
                 <div className="space-y-4">
                   <div className="grid gap-4 xl:grid-cols-[285px_minmax(0,1fr)]">
-                  <div className="bai-card flex flex-col p-5">
-                    <div className="flex items-center gap-2.5">
-                      <span className="grid h-8 w-8 place-items-center rounded-lg bg-primary/10 text-primary">
-                        <GitBranch className="h-4 w-4" />
-                      </span>
-                      <div>
-                        <p className="label">Pipeline</p>
-                        <p className="mt-1 text-[10px] text-muted-foreground">
-                          Execution order
-                        </p>
-                      </div>
-                    </div>
-                    <ol className="mt-5 space-y-1">
-                      {pipelineSteps.map((step, index) => (
-                        <li
-                          key={step.label}
-                          className="relative flex gap-3 pb-5 last:pb-0"
-                        >
-                          {index < pipelineSteps.length - 1 && (
-                            <span
-                              className={`absolute left-[13px] top-7 h-[calc(100%-1.25rem)] w-px ${
-                                step.done ? "bg-primary/40" : "bg-ink/10"
-                              }`}
-                            />
-                          )}
-                          <span
-                            className={`relative z-10 grid h-7 w-7 shrink-0 place-items-center rounded-full border text-[10px] ${
-                              step.done
-                                ? "border-primary bg-primary text-white"
-                                : step.active
-                                  ? "border-primary bg-primary/10 font-semibold text-primary"
-                                  : "border-ink/15 bg-white text-muted-foreground"
-                            }`}
-                          >
-                            {step.done ? (
-                              <Check className="h-3.5 w-3.5" />
-                            ) : step.active ? (
-                              <Loader2 className="h-3 w-3 animate-spin" />
-                            ) : (
-                              index + 1
-                            )}
-                          </span>
-                          <div className="min-w-0 pt-0.5">
-                            <p
-                              className={`text-[11.5px] ${
-                                step.active
-                                  ? "font-semibold text-ink"
-                                  : step.done
-                                    ? "text-ink/70"
-                                    : "text-muted-foreground"
-                              }`}
-                            >
-                              {step.label}
-                            </p>
-                            <p className="mt-0.5 truncate text-[9.5px] text-muted-foreground">
-                              {step.detail}
-                            </p>
-                          </div>
-                        </li>
-                      ))}
-                    </ol>
-                    <div className="mt-auto pt-4">
-                      <div className="rounded-xl border border-ink/8 bg-paper/70 px-3 py-2.5">
-                        <div className="flex items-center justify-between gap-2 text-[9.5px]">
-                          <span className="text-muted-foreground">Session</span>
-                          <span className="truncate font-mono">
-                            {activeSessionId}
-                          </span>
-                        </div>
-                        <div className="mt-1.5 flex items-center justify-between gap-2 text-[9.5px]">
-                          <span className="text-muted-foreground">Runtime</span>
-                          <span className="truncate">
-                            {runtime === "private"
-                              ? "Private workspace"
-                              : "Shared server"}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="bai-card overflow-hidden">
-                    <div className="flex items-center justify-between gap-3 border-b border-ink/8 px-5 py-4">
+                    <div className="bai-card flex flex-col p-5">
                       <div className="flex items-center gap-2.5">
-                        <span className="grid h-8 w-8 place-items-center rounded-lg bg-ink/5 text-ink">
-                          <Terminal className="h-4 w-4" />
+                        <span className="grid h-8 w-8 place-items-center rounded-lg bg-primary/10 text-primary">
+                          <GitBranch className="h-4 w-4" />
                         </span>
                         <div>
-                          <p className="label">Agent Trace</p>
-                          <p className="mt-1 font-mono text-[9px] text-muted-foreground">
-                            {activeSessionId} ·{" "}
-                            {runtime === "private"
-                              ? "private sandbox"
-                              : "shared sandbox"}
+                          <p className="label">Pipeline</p>
+                          <p className="mt-1 text-[10px] text-muted-foreground">
+                            Execution order
                           </p>
                         </div>
                       </div>
-                      <span className="chip">
-                        <Loader2 className="h-3 w-3 animate-spin" />
-                        Running
-                      </span>
+                      <ol className="mt-5 space-y-1">
+                        {pipelineSteps.map((step, index) => (
+                          <li
+                            key={step.label}
+                            className="relative flex gap-3 pb-5 last:pb-0"
+                          >
+                            {index < pipelineSteps.length - 1 && (
+                              <span
+                                className={`absolute left-[13px] top-7 h-[calc(100%-1.25rem)] w-px ${
+                                  step.done ? "bg-primary/40" : "bg-ink/10"
+                                }`}
+                              />
+                            )}
+                            <span
+                              className={`relative z-10 grid h-7 w-7 shrink-0 place-items-center rounded-full border text-[10px] ${
+                                step.done
+                                  ? "border-primary bg-primary text-white"
+                                  : step.active
+                                    ? "border-primary bg-primary/10 font-semibold text-primary"
+                                    : "border-ink/15 bg-white text-muted-foreground"
+                              }`}
+                            >
+                              {step.done ? (
+                                <Check className="h-3.5 w-3.5" />
+                              ) : step.active ? (
+                                <Loader2 className="h-3 w-3 animate-spin" />
+                              ) : (
+                                index + 1
+                              )}
+                            </span>
+                            <div className="min-w-0 pt-0.5">
+                              <p
+                                className={`text-[11.5px] ${
+                                  step.active
+                                    ? "font-semibold text-ink"
+                                    : step.done
+                                      ? "text-ink/70"
+                                      : "text-muted-foreground"
+                                }`}
+                              >
+                                {step.label}
+                              </p>
+                              <p className="mt-0.5 truncate text-[9.5px] text-muted-foreground">
+                                {step.detail}
+                              </p>
+                            </div>
+                          </li>
+                        ))}
+                      </ol>
+                      <div className="mt-auto pt-4">
+                        <div className="rounded-xl border border-ink/8 bg-paper/70 px-3 py-2.5">
+                          <div className="flex items-center justify-between gap-2 text-[9.5px]">
+                            <span className="text-muted-foreground">
+                              Session
+                            </span>
+                            <span className="truncate font-mono">
+                              {activeSessionId}
+                            </span>
+                          </div>
+                          <div className="mt-1.5 flex items-center justify-between gap-2 text-[9.5px]">
+                            <span className="text-muted-foreground">
+                              Runtime
+                            </span>
+                            <span className="truncate">
+                              {runtime === "private"
+                                ? "Private workspace"
+                                : "Shared server"}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
                     </div>
-                    <div
-                      ref={traceRef}
-                      className="max-h-[430px] min-h-[360px] space-y-2 overflow-y-auto bg-[#0d1117] p-4 font-mono text-[11px] leading-relaxed text-slate-300"
-                    >
-                      <p className="text-slate-500">
-                        $ connect --workspace {activeSessionId}
-                      </p>
-                      <p className="text-emerald-400">
-                        ✓ isolated workspace ready
-                      </p>
-                      {activities.map((line, index) => (
-                        <p key={`activity-${index}`} className="text-slate-300">
-                          <span className="mr-2 text-emerald-400">›</span>
-                          {line}
-                        </p>
-                      ))}
-                      {messages.map((message, index) => (
-                        <p
-                          key={`message-${index}`}
-                          className="whitespace-pre-wrap border-l-2 border-primary/60 pl-3 text-slate-200"
-                        >
-                          {message}
-                        </p>
-                      ))}
-                      {!activities.length && !messages.length && (
-                        <p className="text-slate-500">
-                          Waiting for Agent to start…
-                        </p>
-                      )}
-                      <p className="flex items-center gap-1.5 pt-1">
-                        <span className="text-emerald-400">$</span>
-                        <span className="h-3.5 w-1.5 animate-pulse bg-emerald-400" />
-                      </p>
-                    </div>
-                  </div>
-                </div>
 
-                <div className="bai-card p-4 md:p-5">
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <div className="flex items-center gap-2">
-                      <Box className="h-4 w-4 text-primary" />
-                      <p className="text-xs font-semibold">Event run</p>
-                      <span className="font-mono text-[9.5px] text-muted-foreground">
-                        {processEventCount} event
-                        {processEventCount === 1 ? "" : "s"}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <span className="font-display text-lg font-bold">
-                        {Math.round(processProgress)}%
-                      </span>
-                      <Button
-                        size="sm"
-                        variant="line"
-                        onClick={cancelExecution}
+                    <div className="bai-card overflow-hidden">
+                      <div className="flex items-center justify-between gap-3 border-b border-ink/8 px-5 py-4">
+                        <div className="flex items-center gap-2.5">
+                          <span className="grid h-8 w-8 place-items-center rounded-lg bg-ink/5 text-ink">
+                            <Terminal className="h-4 w-4" />
+                          </span>
+                          <div>
+                            <p className="label">Agent Trace</p>
+                            <p className="mt-1 font-mono text-[9px] text-muted-foreground">
+                              {activeSessionId} ·{" "}
+                              {runtime === "private"
+                                ? "private sandbox"
+                                : "shared sandbox"}
+                            </p>
+                          </div>
+                        </div>
+                        <span className="chip">
+                          <Loader2 className="h-3 w-3 animate-spin" />
+                          Running
+                        </span>
+                      </div>
+                      <div
+                        ref={traceRef}
+                        className="max-h-[430px] min-h-[360px] space-y-2 overflow-y-auto bg-[#0d1117] p-4 font-mono text-[11px] leading-relaxed text-slate-300"
                       >
-                        <Square className="h-3 w-3 fill-current" />
-                        Cancel
-                      </Button>
+                        <p className="text-slate-500">
+                          $ connect --workspace {activeSessionId}
+                        </p>
+                        <p className="text-emerald-400">
+                          ✓ isolated workspace ready
+                        </p>
+                        {activities.map((line, index) => (
+                          <p
+                            key={`activity-${index}`}
+                            className="text-slate-300"
+                          >
+                            <span className="mr-2 text-emerald-400">›</span>
+                            {line}
+                          </p>
+                        ))}
+                        {messages.map((message, index) => (
+                          <p
+                            key={`message-${index}`}
+                            className="whitespace-pre-wrap border-l-2 border-primary/60 pl-3 text-slate-200"
+                          >
+                            {message}
+                          </p>
+                        ))}
+                        {!activities.length && !messages.length && (
+                          <p className="text-slate-500">
+                            Waiting for Agent to start…
+                          </p>
+                        )}
+                        <p className="flex items-center gap-1.5 pt-1">
+                          <span className="text-emerald-400">$</span>
+                          <span className="h-3.5 w-1.5 animate-pulse bg-emerald-400" />
+                        </p>
+                      </div>
                     </div>
                   </div>
-                  <div className="mt-3 h-2.5 overflow-hidden rounded-full bg-ink/8">
-                    <div
-                      className="h-full rounded-full bg-gradient-to-r from-primary via-violet-500 to-sky-400 transition-all duration-700"
-                      style={{ width: `${processProgress}%` }}
-                    />
-                  </div>
-                  <div className="mt-2 flex items-center justify-between gap-2 text-[10px] text-muted-foreground">
-                    <span>
-                      Working in an isolated workspace · live agent output
-                    </span>
-                    <span className="font-mono">
-                      {Math.round(processProgress)} / 100
-                    </span>
+
+                  <div className="bai-card p-4 md:p-5">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div className="flex items-center gap-2">
+                        <Box className="h-4 w-4 text-primary" />
+                        <p className="text-xs font-semibold">Event run</p>
+                        <span className="font-mono text-[9.5px] text-muted-foreground">
+                          {processEventCount} event
+                          {processEventCount === 1 ? "" : "s"}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <span className="font-display text-lg font-bold">
+                          {Math.round(processProgress)}%
+                        </span>
+                        <Button
+                          size="sm"
+                          variant="line"
+                          onClick={cancelExecution}
+                        >
+                          <Square className="h-3 w-3 fill-current" />
+                          Cancel
+                        </Button>
+                      </div>
+                    </div>
+                    <div className="mt-3 h-2.5 overflow-hidden rounded-full bg-ink/8">
+                      <div
+                        className="h-full rounded-full bg-gradient-to-r from-primary via-violet-500 to-sky-400 transition-all duration-700"
+                        style={{ width: `${processProgress}%` }}
+                      />
+                    </div>
+                    <div className="mt-2 flex items-center justify-between gap-2 text-[10px] text-muted-foreground">
+                      <span>
+                        Working in an isolated workspace · live agent output
+                      </span>
+                      <span className="font-mono">
+                        {Math.round(processProgress)} / 100
+                      </span>
+                    </div>
                   </div>
                 </div>
-              </div>
 
                 <PendingQuickBooksOperations
                   operations={pendingOperations}

@@ -24,6 +24,7 @@ export type OAuthStateDoc = {
   state_hash: string;
   session_id: string;
   return_to: string;
+  redirect_uri?: string;
   created_at: Date;
   expires_at: Date;
 };
@@ -343,6 +344,7 @@ export async function createOAuthState(input: {
   stateHash: string;
   sessionHash: string;
   returnTo: string;
+  redirectUri?: string;
   ttlSeconds: number;
 }): Promise<void> {
   await withStore((store) => {
@@ -355,6 +357,7 @@ export async function createOAuthState(input: {
       state_hash: input.stateHash,
       session_id: input.sessionHash,
       return_to: input.returnTo,
+      redirect_uri: input.redirectUri,
       created_at: now,
       expires_at: new Date(now.getTime() + input.ttlSeconds * 1000),
     });
@@ -867,6 +870,12 @@ export async function getClaudeOAuthTokens(
     accessTokenExpiresAt: record.access_token_expires_at || null,
     refreshTokenExpiresAt: record.refresh_token_expires_at || null,
   };
+}
+
+export async function hasClaudeAuth(sessionHash: string): Promise<boolean> {
+  return withStore(
+    (store) => store.claudeAuth.some((item) => item.session_id === sessionHash),
+  );
 }
 
 export async function clearClaudeAuth(sessionHash: string): Promise<void> {

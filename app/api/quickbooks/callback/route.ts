@@ -1,12 +1,18 @@
 import {
   consumeState,
   exchangeCodeForTokens,
+  getAppOrigin,
+  getQBConfig,
   getRedirectUri,
-  getRequestOrigin,
-  saveTokens,
   sanitizeReturnTo,
 } from "@/lib/quickbooks";
-import { importExistingQuickBooksConnection } from "@/lib/mcp/quickbooks";
+import {
+  saveQuickBooksConnection,
+  setPrimaryConnection,
+} from "@/lib/mcp/db";
+import { redirectWithSession } from "@/lib/mcp/http";
+import { resolveBrowserSession } from "@/lib/mcp/session";
+import { encryptCredential } from "@/lib/mcp/security";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -23,79 +29,71 @@ function appendQuery(path: string, params: Record<string, string>): string {
 /**
  * GET /api/quickbooks/callback
  *
- * Intuit redirects the user here after they authorize the app.
- * We receive the authorization code, exchange it for tokens,
- * save them, and redirect the user back to the workspace they
- * started from.
+ * Exchanges the code and stores the tokens under this browser session and
+ * company (realm), never in a process-wide file shared by other users.
  */
 export async function GET(request: Request) {
   const url = new URL(request.url);
+  const baseUrl = getAppOrigin(request);
   const code = url.searchParams.get("code");
   const state = url.searchParams.get("state");
   const realmId = url.searchParams.get("realmId");
   const error = url.searchParams.get("error");
 
-  // Consume state first so the return path is available for every branch.
-  const stateRecord = state ? await consumeState(state) : null;
+  const session = await resolveBrowserSession(request);
+  const stateRecord = state
+    ? await consumeState(state, session.hash)
+    : null;
   const returnTo = stateRecord?.returnTo || "/";
+  const done = (params: Record<string, string>) =>
+    redirectWithSession(
+      `${baseUrl}${appendQuery(returnTo, params)}`,
+      session,
+    );
 
-  // Base URL for redirecting back to the app. Derive it from the request so
-  // OAuth works on localhost, LAN IPs, and tunnel hosts without env edits.
-  const baseUrl = getRequestOrigin(request);
-
-  // User denied access or Intuit returned an error
   if (error) {
     console.error("QuickBooks OAuth error:", error);
-    return Response.redirect(
-      `${baseUrl}${appendQuery(returnTo, { qb: "error", reason: error })}`,
-    );
+    return done({ qb: "error", reason: error });
   }
-
-  // Validate required params
-  if (!code || !state || !realmId) {
-    return Response.redirect(
-      `${baseUrl}${appendQuery(returnTo, {
-        qb: "error",
-        reason: "missing_params",
-      })}`,
-    );
-  }
-
-  // Validate CSRF state
-  if (!stateRecord) {
-    return Response.redirect(
-      `${baseUrl}${appendQuery(returnTo, {
-        qb: "error",
-        reason: "invalid_state",
-      })}`,
-    );
+  if (!code || !state || !realmId || !stateRecord) {
+    return done({
+      qb: "error",
+      reason: stateRecord ? "missing_params" : "invalid_state",
+    });
   }
 
   try {
-    // Exchange code for access + refresh tokens using the same redirect URI
-    // that was sent to Intuit in the authorization request.
     const tokens = await exchangeCodeForTokens(
       code,
       realmId,
-      getRedirectUri(request),
+      stateRecord.redirectUri || getRedirectUri(request),
     );
-    await saveTokens(tokens);
-
-    if (stateRecord.sessionHash) {
-      await importExistingQuickBooksConnection(stateRecord.sessionHash, "oauth");
-    }
-
-    // Redirect back to the page the user started the connection from.
-    return Response.redirect(
-      `${baseUrl}${appendQuery(returnTo, { qb: "connected" })}`,
-    );
+    const now = Date.now();
+    await saveQuickBooksConnection({
+      sessionHash: session.hash,
+      realmId,
+      companyName: "QuickBooks company",
+      environment: getQBConfig().environment,
+      accessToken: encryptCredential(
+        tokens.access_token,
+        session.hash,
+        realmId,
+      ),
+      refreshToken: encryptCredential(
+        tokens.refresh_token,
+        session.hash,
+        realmId,
+      ),
+      accessTokenExpiresAt: new Date(now + tokens.expires_in * 1000),
+      refreshTokenExpiresAt: new Date(
+        now + tokens.x_refresh_token_expires_in * 1000,
+      ),
+      origin: "oauth",
+    });
+    await setPrimaryConnection(session.hash, realmId);
+    return done({ qb: "connected" });
   } catch (err) {
     console.error("QuickBooks token exchange error:", err);
-    return Response.redirect(
-      `${baseUrl}${appendQuery(returnTo, {
-        qb: "error",
-        reason: "token_exchange",
-      })}`,
-    );
+    return done({ qb: "error", reason: "token_exchange" });
   }
 }

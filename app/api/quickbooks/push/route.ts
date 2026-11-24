@@ -1,12 +1,12 @@
 import { appendFile, mkdir } from "node:fs/promises";
 import path from "node:path";
-import {
-  getQBConfig,
-  getRequestOrigin,
-  loadTokens,
-  qbApiUpdate,
-} from "@/lib/quickbooks";
+import { getRequestOrigin } from "@/lib/quickbooks";
 import { parseQuickBooksUpdates } from "@/lib/quickbooks-entities";
+import { mcpErrorMessage } from "@/lib/mcp/config";
+import { getAgentPermissions, getPrimaryConnection } from "@/lib/mcp/db";
+import { mcpJson } from "@/lib/mcp/http";
+import { ensureWritesAllowed, qbUpdate } from "@/lib/mcp/quickbooks";
+import { resolveBrowserSession } from "@/lib/mcp/session";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -24,39 +24,44 @@ type PushResult = {
 /**
  * POST /api/quickbooks/push
  *
- * Apply approved AI-proposed updates to existing QuickBooks records.
- * Sandbox-only by default: production writes require
+ * Apply approved AI-proposed updates to the QuickBooks company connected to
+ * this browser session. Sandbox-only by default: production writes require
  * QB_ALLOW_PRODUCTION_WRITES=true.
  */
 export async function POST(request: Request) {
+  const session = await resolveBrowserSession(request);
   const contentType = request.headers.get("content-type") || "";
   if (!contentType.includes("application/json")) {
-    return Response.json(
+    return mcpJson(
       { error: "Content-Type must be application/json." },
-      { status: 415 },
+      415,
+      session,
     );
   }
 
   if (request.headers.get("x-qb-confirm") !== "push") {
-    return Response.json(
+    return mcpJson(
       { error: "Missing QuickBooks write confirmation header." },
-      { status: 400 },
+      400,
+      session,
     );
   }
 
   const origin = request.headers.get("origin");
   if (origin && origin !== getRequestOrigin(request)) {
-    return Response.json(
+    return mcpJson(
       { error: "Cross-origin QuickBooks writes are not allowed." },
-      { status: 403 },
+      403,
+      session,
     );
   }
 
   const contentLength = Number(request.headers.get("content-length") || 0);
   if (contentLength > 2_000_000) {
-    return Response.json(
+    return mcpJson(
       { error: "QuickBooks update payload is too large." },
-      { status: 413 },
+      413,
+      session,
     );
   }
 
@@ -64,54 +69,53 @@ export async function POST(request: Request) {
     | { sessionId?: unknown; operations?: unknown }
     | null;
   if (!body) {
-    return Response.json({ error: "Invalid JSON body." }, { status: 400 });
+    return mcpJson({ error: "Invalid JSON body." }, 400, session);
   }
 
   const parsed = parseQuickBooksUpdates(body.operations);
   if (!parsed.operations) {
-    return Response.json(
+    return mcpJson(
       { error: parsed.error || "Invalid update operations." },
-      { status: 400 },
+      400,
+      session,
     );
   }
 
-  const { environment } = getQBConfig();
-  if (
-    environment === "production" &&
-    process.env.QB_ALLOW_PRODUCTION_WRITES !== "true"
-  ) {
-    return Response.json(
-      {
-        error:
-          "Production QuickBooks writes are disabled. Use a sandbox company or set QB_ALLOW_PRODUCTION_WRITES=true.",
-      },
-      { status: 403 },
+  const connection = await getPrimaryConnection(session.hash);
+  if (!connection?.is_connected) {
+    return mcpJson({ error: "QuickBooks is not connected." }, 401, session);
+  }
+
+  try {
+    ensureWritesAllowed(connection.environment);
+  } catch (error) {
+    return mcpJson({ error: mcpErrorMessage(error) }, 403, session);
+  }
+
+  const permissions = await getAgentPermissions(session.hash);
+  if (!permissions.includes("update")) {
+    return mcpJson(
+      { error: "Grant the Update permission before pushing changes." },
+      403,
+      session,
     );
   }
 
-  const tokens = await loadTokens();
-  if (!tokens) {
-    return Response.json(
-      { error: "QuickBooks is not connected." },
-      { status: 401 },
-    );
-  }
-
-  let currentTokens = tokens;
   const results: PushResult[] = [];
 
   for (const operation of parsed.operations) {
     try {
-      const { data, tokens: updatedTokens } = await qbApiUpdate<Record<
-        string,
-        unknown
-      >>(operation.entity, currentTokens, {
-        ...operation.fields,
-        Id: operation.id,
-        SyncToken: operation.syncToken,
-        sparse: true,
-      });
-      currentTokens = updatedTokens;
+      const data = await qbUpdate<Record<string, unknown>>(
+        session.hash,
+        connection,
+        operation.entity,
+        {
+          ...operation.fields,
+          Id: operation.id,
+          SyncToken: operation.syncToken,
+          sparse: true,
+        },
+      );
       results.push({
         entity: operation.entity,
         id: operation.id,
@@ -124,7 +128,7 @@ export async function POST(request: Request) {
         entity: operation.entity,
         id: operation.id,
         ok: false,
-        error: error instanceof Error ? error.message : "Update failed.",
+        error: mcpErrorMessage(error),
       });
     }
   }
@@ -139,8 +143,8 @@ export async function POST(request: Request) {
         path.join(DATA_DIR, "quickbooks-push-log.jsonl"),
         `${JSON.stringify({
           at: new Date().toISOString(),
-          realmId: tokens.realm_id,
-          environment,
+          realmId: connection.realm_id,
+          environment: connection.environment,
           sessionId,
           results,
         })}\n`,
@@ -149,9 +153,13 @@ export async function POST(request: Request) {
     )
     .catch((error) => console.error("QuickBooks audit log failed", error));
 
-  return Response.json({
-    ok: results.every((result) => result.ok),
-    environment,
-    results,
-  });
+  return mcpJson(
+    {
+      ok: results.every((result) => result.ok),
+      environment: connection.environment,
+      results,
+    },
+    200,
+    session,
+  );
 }

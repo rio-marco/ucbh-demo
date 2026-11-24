@@ -35,9 +35,12 @@ export async function POST(request: Request) {
       scopes?: unknown;
     } | null;
     const scopes = normalizeAgentPermissions(body?.scopes);
-    if (!scopes.length) {
+    if (!scopes.includes("read")) {
       return mcpJson(
-        { error: "Choose at least one QuickBooks permission." },
+        {
+          error:
+            "View company data is required so the agent can read QuickBooks records.",
+        },
         400,
         session,
       );

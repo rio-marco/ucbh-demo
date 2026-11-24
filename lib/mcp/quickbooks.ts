@@ -1,19 +1,13 @@
 import { randomUUID } from "node:crypto";
-import {
-  INTUIT_TOKEN_URL,
-  getQBConfig,
-  loadTokens,
-} from "@/lib/quickbooks";
-import { mcpConfig, McpError } from "@/lib/mcp/config";
+import { INTUIT_TOKEN_URL, getQBConfig } from "@/lib/quickbooks";
+import { mcpConfig, mcpErrorCode, McpError } from "@/lib/mcp/config";
+import { getRuntimeEnv } from "@/lib/runtime-env";
 import {
   acquireRefreshLock,
   getConnection,
   markConnectionDisconnected,
   releaseRefreshLock,
-  saveQuickBooksConnection,
-  setPrimaryConnection,
   updateConnectionTokens,
-  type ConnectionOrigin,
   type QuickBooksConnectionDoc,
 } from "@/lib/mcp/db";
 import {
@@ -47,39 +41,6 @@ function errorFromBody(status: number, body: string): string {
 
 function apiBase(connection: QuickBooksConnectionDoc): string {
   return QB_API_BASE[connection.environment] || QB_API_BASE.sandbox;
-}
-
-export async function importExistingQuickBooksConnection(
-  sessionHash: string,
-  origin: ConnectionOrigin = "import",
-): Promise<QuickBooksConnectionDoc | null> {
-  const tokens = await loadTokens();
-  if (!tokens?.access_token || !tokens?.refresh_token || !tokens?.realm_id) {
-    return null;
-  }
-  const existing = await getConnection(sessionHash, tokens.realm_id);
-  if (existing?.is_connected && existing.origin === origin) {
-    await setPrimaryConnection(sessionHash, tokens.realm_id);
-    return existing;
-  }
-  const createdMs = new Date(tokens.created_at).getTime();
-  if (!Number.isFinite(createdMs)) return null;
-
-  const connection = await saveQuickBooksConnection({
-    sessionHash,
-    realmId: tokens.realm_id,
-    companyName: "QuickBooks company",
-    environment: getQBConfig().environment,
-    accessToken: encryptCredential(tokens.access_token, sessionHash, tokens.realm_id),
-    refreshToken: encryptCredential(tokens.refresh_token, sessionHash, tokens.realm_id),
-    accessTokenExpiresAt: new Date(createdMs + tokens.expires_in * 1000),
-    refreshTokenExpiresAt: new Date(
-      createdMs + tokens.x_refresh_token_expires_in * 1000,
-    ),
-    origin,
-  });
-  await setPrimaryConnection(sessionHash, tokens.realm_id);
-  return connection;
 }
 
 export function accessTokenExpiring(connection: QuickBooksConnectionDoc): boolean {
@@ -294,8 +255,16 @@ export async function getCompanyName(
       connection,
       `companyinfo/${connection.realm_id}`,
     );
-    return data.CompanyInfo?.CompanyName || "QuickBooks company";
-  } catch {
+    return (
+      data.CompanyInfo?.CompanyName ||
+      connection.company_name ||
+      "QuickBooks company"
+    );
+  } catch (error) {
+    const code = mcpErrorCode(error);
+    if (code === "missing_permissions" || code === "token_refresh_failed") {
+      throw error;
+    }
     return connection.company_name || "QuickBooks company";
   }
 }
@@ -306,7 +275,7 @@ export function ensureWritesAllowed(
   if (!mcpConfig().allowWrites) throw new McpError("writes_disabled");
   if (
     environment === "production" &&
-    process.env.QB_ALLOW_PRODUCTION_WRITES !== "true"
+    getRuntimeEnv("QB_ALLOW_PRODUCTION_WRITES") !== "true"
   ) {
     throw new McpError("writes_disabled", "Production writes require QB_ALLOW_PRODUCTION_WRITES=true.");
   }

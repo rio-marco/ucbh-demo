@@ -83,10 +83,13 @@ function readEnvFile(name: EnvFileName): Record<string, string> {
 }
 
 function envFiles(): EnvFileName[] {
-  const mode = process.env.NODE_ENV === "production" ? "production" : "development";
+  // Later files win. `.env` is last so it is always the source of truth and
+  // `.env.local` can never override a value configured there.
+  const mode =
+    process.env.NODE_ENV === "production" ? "production" : "development";
   return mode === "production"
-    ? [".env", ".env.production", ".env.local", ".env.production.local"]
-    : [".env", ".env.development", ".env.local", ".env.development.local"];
+    ? [".env.production.local", ".env.production", ".env.local", ".env"]
+    : [".env.development.local", ".env.development", ".env.local", ".env"];
 }
 
 function currentEnvValues(): Record<string, string> {

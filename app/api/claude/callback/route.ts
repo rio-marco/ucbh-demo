@@ -7,6 +7,7 @@ import {
   consumeClaudeOAuthState,
   saveClaudeOAuthTokens,
 } from "@/lib/mcp/db";
+import { redirectWithSession } from "@/lib/mcp/http";
 import { resolveBrowserSession } from "@/lib/mcp/session";
 import { decryptCredential } from "@/lib/mcp/security";
 import { getRequestOrigin, sanitizeReturnTo } from "@/lib/quickbooks";
@@ -30,6 +31,17 @@ export async function GET(request: Request) {
   const error = url.searchParams.get("error");
 
   const session = await resolveBrowserSession(request);
+  const done = (params: Record<string, string>, returnTo = "/") =>
+    redirectWithSession(
+      `${baseUrl}${appendQuery(returnTo, params)}`,
+      session,
+    );
+
+  const config = getClaudeOAuthConfig();
+  if (!config) {
+    return done({ claude: "error", reason: "configuration" });
+  }
+
   const stateRecord = state
     ? await consumeClaudeOAuthState(
         hashClaudeOAuthState(state),
@@ -39,26 +51,15 @@ export async function GET(request: Request) {
   const returnTo = stateRecord?.return_to || "/";
 
   if (error) {
-    return Response.redirect(
-      `${baseUrl}${appendQuery(returnTo, { claude: "error", reason: error })}`,
-    );
+    return done({ claude: "error", reason: error }, returnTo);
   }
   if (!code || !state || !stateRecord) {
-    return Response.redirect(
-      `${baseUrl}${appendQuery(returnTo, {
+    return done(
+      {
         claude: "error",
         reason: stateRecord ? "missing_params" : "invalid_state",
-      })}`,
-    );
-  }
-
-  const config = getClaudeOAuthConfig();
-  if (!config) {
-    return Response.redirect(
-      `${baseUrl}${appendQuery(returnTo, {
-        claude: "error",
-        reason: "configuration",
-      })}`,
+      },
+      returnTo,
     );
   }
 
@@ -70,12 +71,7 @@ export async function GET(request: Request) {
       "claude-pkce",
     );
   } catch {
-    return Response.redirect(
-      `${baseUrl}${appendQuery(returnTo, {
-        claude: "error",
-        reason: "invalid_state",
-      })}`,
-    );
+    return done({ claude: "error", reason: "invalid_state" }, returnTo);
   }
 
   try {
@@ -101,16 +97,15 @@ export async function GET(request: Request) {
         ? new Date(now + tokens.refreshTokenExpiresIn * 1000)
         : null,
     });
-    return Response.redirect(
-      `${baseUrl}${appendQuery(returnTo, { claude: "connected" })}`,
-    );
+    return done({ claude: "connected" }, returnTo);
   } catch (error) {
     console.error("Claude OAuth token exchange failed", error);
-    return Response.redirect(
-      `${baseUrl}${appendQuery(returnTo, {
+    return done(
+      {
         claude: "error",
         reason: "token_exchange",
-      })}`,
+      },
+      returnTo,
     );
   }
 }

@@ -8,6 +8,7 @@ import {
   timingSafeEqual,
 } from "node:crypto";
 import { mcpConfig, McpError } from "@/lib/mcp/config";
+import { getRuntimeEnv } from "@/lib/runtime-env";
 
 export const SESSION_COOKIE = "ucbh_sid";
 export const SESSION_TOKEN_BYTES = 32;
@@ -40,24 +41,27 @@ export function isWellFormedSessionToken(value: string): boolean {
   return /^[A-Za-z0-9_-]{43}$/.test(value);
 }
 
-export function sessionCookieHeader(token: string): string {
+function cookieFlags(secure: boolean): string {
   return [
-    `${SESSION_COOKIE}=${token}`,
     "Path=/",
     "HttpOnly",
-    "Secure",
+    ...(secure ? ["Secure"] : []),
     "SameSite=Lax",
+  ].join("; ");
+}
+
+export function sessionCookieHeader(token: string, secure: boolean): string {
+  return [
+    `${SESSION_COOKIE}=${token}`,
+    cookieFlags(secure),
     `Max-Age=${SESSION_TTL_SECONDS}`,
   ].join("; ");
 }
 
-export function clearSessionCookieHeader(): string {
+export function clearSessionCookieHeader(secure: boolean): string {
   return [
     `${SESSION_COOKIE}=`,
-    "Path=/",
-    "HttpOnly",
-    "Secure",
-    "SameSite=Lax",
+    cookieFlags(secure),
     "Max-Age=0",
   ].join("; ");
 }
@@ -85,7 +89,7 @@ function encryptionContext(sessionId: string, realmId: string): Buffer {
 }
 
 function getEncryptionKey(): Buffer {
-  const raw = process.env.TOKEN_ENCRYPTION_KEY || "";
+  const raw = getRuntimeEnv("TOKEN_ENCRYPTION_KEY");
   let key: Buffer;
   try {
     key = Buffer.from(raw, "base64");
@@ -148,7 +152,7 @@ export function decryptCredential(
 }
 
 function getSigningSecret(): string {
-  const secret = process.env.MCP_SIGNING_SECRET || "";
+  const secret = getRuntimeEnv("MCP_SIGNING_SECRET");
   if (secret.length < 32) throw new McpError("config_error");
   return secret;
 }

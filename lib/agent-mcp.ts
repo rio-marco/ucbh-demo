@@ -1,4 +1,5 @@
 import { hasAgentPermission, type AgentPermission } from "@/lib/agent-permissions";
+import { mcpConfig } from "@/lib/mcp/config";
 import { callMcpTool, initializeMcpSession, listMcpTools } from "@/lib/mcp/client";
 import { claudeToolSchemas, VISIBLE_MCP_TOOLS } from "@/lib/mcp/tools";
 
@@ -41,11 +42,9 @@ type RemoteTool = {
 
 function canUse(toolName: string, permissions: AgentPermission[]): boolean {
   const permission = TOOL_PERMISSIONS[toolName];
-  return Boolean(
-    visibleTools.has(toolName) &&
-      permission &&
-      hasAgentPermission(permissions, permission),
-  );
+  if (!permission || !hasAgentPermission(permissions, permission)) return false;
+  if (permission === "update" && !mcpConfig().allowWrites) return false;
+  return visibleTools.has(toolName);
 }
 
 export function isAgentMcpToolName(name: string): boolean {

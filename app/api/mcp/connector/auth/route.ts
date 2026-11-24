@@ -8,20 +8,30 @@ import {
 } from "@/lib/quickbooks";
 import { assertMcpSecretsConfigured, McpError } from "@/lib/mcp/config";
 import { getPrimaryConnection } from "@/lib/mcp/db";
+import { getCompanyName } from "@/lib/mcp/quickbooks";
 import { mcpErrorResponse, mcpJson } from "@/lib/mcp/http";
-import { resolveBrowserSession } from "@/lib/mcp/session";
+import {
+  resolveBrowserSession,
+  type BrowserSession,
+} from "@/lib/mcp/session";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
+  let session: BrowserSession | null = null;
   try {
     assertMcpSecretsConfigured();
 
-    const session = await resolveBrowserSession(request);
+    session = await resolveBrowserSession(request);
     const connection = await getPrimaryConnection(session.hash);
     if (connection?.is_connected) {
-      return mcpJson({ connected: true }, 200, session);
+      try {
+        await getCompanyName(session.hash, connection);
+        return mcpJson({ connected: true }, 200, session);
+      } catch {
+        // The tokens are stale; fall through and let the user reconnect.
+      }
     }
 
     const { clientId, clientSecret } = getQBConfig();
@@ -29,12 +39,13 @@ export async function GET(request: Request) {
       throw new McpError("config_error");
     }
 
+    const redirectUri = getRedirectUri(request);
     const url = new URL(request.url);
     const returnTo = sanitizeReturnTo(url.searchParams.get("returnTo"));
-    const state = await generateState(returnTo, session.hash);
+    const state = await generateState(returnTo, session.hash, redirectUri);
     const params = new URLSearchParams({
       client_id: clientId,
-      redirect_uri: getRedirectUri(request),
+      redirect_uri: redirectUri,
       response_type: "code",
       scope: QB_SCOPES,
       state,
@@ -46,6 +57,6 @@ export async function GET(request: Request) {
       session,
     );
   } catch (error) {
-    return mcpErrorResponse(error);
+    return mcpErrorResponse(error, session);
   }
 }

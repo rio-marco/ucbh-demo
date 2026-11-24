@@ -1,4 +1,8 @@
-import { assertMcpSecretsConfigured } from "@/lib/mcp/config";
+import {
+  assertMcpSecretsConfigured,
+  mcpErrorCode,
+  mcpErrorMessage,
+} from "@/lib/mcp/config";
 import {
   appendAuditLog,
   disconnectConnection,
@@ -18,18 +22,32 @@ export async function GET(request: Request) {
     assertMcpSecretsConfigured();
     const connection = await getPrimaryConnection(session.hash);
     const connections = await listConnections(session.hash);
-    const companyName = connection?.is_connected
-      ? await getCompanyName(session.hash, connection)
-      : null;
+    let companyName: string | null = null;
+    let stale = false;
+    let reason: string | null = null;
+    let error: string | null = null;
+
+    if (connection?.is_connected) {
+      try {
+        companyName = await getCompanyName(session.hash, connection);
+      } catch (verificationError) {
+        stale = true;
+        reason = mcpErrorCode(verificationError);
+        error = mcpErrorMessage(verificationError);
+      }
+    }
 
     return mcpJson(
       {
-        connected: Boolean(connection?.is_connected),
+        connected: Boolean(connection?.is_connected) && !stale,
+        stale,
         companyName,
         environment: connection?.is_connected ? connection.environment : null,
         connectionCount: connections.filter(
           (item) => item.is_connected && item.origin === "oauth",
         ).length,
+        reason,
+        error,
       },
       200,
       session,

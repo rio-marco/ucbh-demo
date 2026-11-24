@@ -1,3 +1,5 @@
+import { getRuntimeEnv } from "@/lib/runtime-env";
+
 export type McpErrorCode =
   | "not_connected"
   | "session_expired"
@@ -79,8 +81,8 @@ export function mcpErrorMessage(error: unknown): string {
 
 export function mcpConfig() {
   return {
-    serverUrl: process.env.MCP_SERVER_URL || "",
-    allowWrites: process.env.MCP_ALLOW_WRITES === "true",
+    serverUrl: getRuntimeEnv("MCP_SERVER_URL"),
+    allowWrites: getRuntimeEnv("MCP_ALLOW_WRITES") === "true",
     sessionTtlSeconds: 30 * 24 * 60 * 60,
     oauthStateTtlSeconds: 10 * 60,
     mcpTokenTtlSeconds: 5 * 60,
@@ -89,8 +91,8 @@ export function mcpConfig() {
 }
 
 export function assertMcpSecretsConfigured(): void {
-  const encryptionKey = process.env.TOKEN_ENCRYPTION_KEY || "";
-  const signingSecret = process.env.MCP_SIGNING_SECRET || "";
+  const encryptionKey = getRuntimeEnv("TOKEN_ENCRYPTION_KEY");
+  const signingSecret = getRuntimeEnv("MCP_SIGNING_SECRET");
 
   if (!encryptionKey || !signingSecret || signingSecret.length < 32) {
     throw new McpError("config_error");

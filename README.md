@@ -2,12 +2,18 @@
 
 Next.js application for running Claude against uploaded CSV/JSON files and QuickBooks Online data in an isolated temporary workspace.
 
+## Per-user connections
+
+Each browser session connects its own Claude account and QuickBooks company. A configured Claude fallback token is used only if the connected Claude organization cannot be billed. Write-back is disabled by default (`MCP_ALLOW_WRITES=false`), and the balance/estimate shown in the UI is illustrative — no payment is collected. Set `QB_ENVIRONMENT=production` with approved Intuit production keys to connect live companies.
+
 ## Run locally
 
 ```bash
 npm install
 npm run dev
 ```
+
+`.env` is the source of truth for every configured key. `.env.local` can never override a value set in `.env`; `.env.example` is only the committed template.
 
 Claude uses Claude Platform OAuth: the user clicks **Connect Claude CoWork**, signs in on `auth.claude.com`, approves the app, and returns to the workspace. Tokens are exchanged and stored by the backend per browser session; users never enter an API key. `/api/claude/status` reports the per-session connection and gates MCP access. OAuth and model env files are read at runtime, so `.env*` changes apply without a process restart. Set `CLAUDE_MODEL` to override the default model; if unavailable, the runner tries `CLAUDE_FALLBACK_MODELS` (comma-separated, defaults to `claude-haiku-4-5-20251001`).
 
@@ -34,9 +40,23 @@ QB_REDIRECT_URI=http://localhost:3000/api/quickbooks/callback
 QB_ENVIRONMENT=sandbox
 ```
 
-The callback URL is derived from the origin the browser is using, so localhost and tunnel previews (ngrok, Cloudflare Tunnel) both work. If `QB_REDIRECT_URI` matches the current origin it is used as-is; otherwise the app builds `<current-origin>/api/quickbooks/callback`.
+In sandbox mode the callback URL is derived from the origin the browser is using, so localhost and tunnel previews (ngrok, Cloudflare Tunnel) both work. If `QB_REDIRECT_URI` matches the current origin it is used as-is; otherwise the app builds `<current-origin>/api/quickbooks/callback`.
 
 Register **every** redirect URI you use in the Intuit developer dashboard, exactly matching scheme, host, port, and path. Development/sandbox keys allow `http://localhost`; production and tunnel URLs require HTTPS. A random free ngrok URL changes on restart, so use a static tunnel domain if you need a stable callback.
+
+### Intuit production setup
+
+Use approved production keys and set:
+
+```bash
+QB_CLIENT_ID=...
+QB_CLIENT_SECRET=...
+QB_REDIRECT_URI=https://your-domain.example/api/quickbooks/callback
+QB_ENVIRONMENT=production
+QB_ALLOW_PRODUCTION_WRITES=false
+```
+
+In production the redirect URI is never derived from request headers; the exact configured HTTPS URL is used for both the authorization request and token exchange. In the Intuit portal set the production launch URL to `/`, redirect URI to `/api/quickbooks/callback`, reconnect URL to `/reconnect`, disconnect URL to `/disconnect`, privacy policy to `/privacy`, and EULA to `/eula`. Replace the placeholder legal pages before submitting the app assessment. Production writes also require `QB_ALLOW_PRODUCTION_WRITES=true`, `MCP_ALLOW_WRITES=true`, and the visitor's Update permission.
 
 The OAuth scope is `com.intuit.quickbooks.accounting`. The `/api/quickbooks/data` endpoint can fetch customers (`quickbooks-customers.csv`), vendors (`quickbooks-vendors.csv`), employees (`quickbooks-employees.csv`), invoices (`quickbooks-invoices.csv`), bills (`quickbooks-bills.csv`) and sales orders (`quickbooks-sales-orders.csv`, when the connected company exposes that entity). No other entities, company info or reports are imported. Per-entity failures are reported without discarding the rest of the import.
 
@@ -72,9 +92,16 @@ After Claude, the MCP connection and permissions are ready, **Continue to the pr
 
 Claude login uses Claude Platform OAuth (Linked billing). It requires an eligible Claude organization with Admin or Billing access; personal `claude.ai` accounts and subscription-only organizations cannot be linked. The organization that owns the OAuth app cannot link that app to itself, so approval must come from a separate eligible Claude Console organization. For testing, link a second organization that pays Anthropic directly, not the organization that owns the OAuth app.
 
+Linked billing checklist:
+- Use a second Claude Console organization that pays Anthropic directly for API usage (prepaid credits bought in Console or invoice). Subscription plans, marketplace billing, promotional/partner credits, and the organization that owns the OAuth app cannot be linked.
+- The approver needs Admin or Billing role in that customer organization.
+- While the app is in testing, add the approver's Claude email under the app's **Settings → Test users**. Org **Members** and app **Test users** are different lists.
+- During approval set the app spend cap to $50 USD or less. Testing does not offer "Continue without a limit"; this cap is a ceiling, not credited usage.
+- Add eligible credits in the customer organization and wait a few minutes for them to apply if a purchase was just made.
+
 In Claude Console:
 1. Create an OAuth app with redirect URI `<origin>/api/claude/callback` and enable **Bill and link to organizations**. Copy its client ID.
-2. Create an active user profile (`uprof_...`) that represents this app/customer.
+2. Create an active user profile (`uprof_...`) that represents this app/customer. Claude allows one customer organization per user profile and one user profile per customer organization. This build stores one profile ID per deployment, so one profile is suitable for one customer organization; add per-session profile creation before serving multiple distinct organizations.
 3. Configure Client authentication with your identity provider issuer, subject pattern, and audience. Register this app's JWKS URL `<origin>/api/claude/jwks`.
 4. Create a service account, configure Workload Identity Federation, and select the service account as the app's operator service account. Set a workspace for connection tokens. Enable Offline access only if you also add `offline_access` to `CLAUDE_OAUTH_SCOPES`.
 5. Generate an RSA key for the JWKS and set the matching key id.
@@ -83,7 +110,7 @@ In Claude Console:
 openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out claude-oauth.pem
 ```
 
-Add to `.env.local`:
+Add to `.env`:
 
 ```bash
 CLAUDE_CLIENT_ID=<client id copied from Claude Console>
@@ -101,7 +128,7 @@ MCP_SIGNING_SECRET=<random string of at least 32 characters>
 
 `CLAUDE_OAUTH_SCOPES` must match the scopes allowed by the Claude OAuth app. If Claude returns `The requested scope is not one this client may be issued`, remove any scope the app has not enabled.
 
-When `CLAUDE_BILLING_FALLBACK=true`, a linked request refused with `user_profile_not_billable` is retried with `CLAUDE_AUTH_TOKEN` and billed to the server-token organization. Keep this disabled when linked customers must always pay for their own runs.
+Requests start with the visitor's own Claude OAuth connection and linked billing. If that organization is not billable (`403 user_profile_not_billable` or `402`), the app retries with the same connection without linked billing, then uses `CLAUDE_AUTH_TOKEN` or `CLAUDE_API_KEY` if configured, so the MCP prompt continues without a billing error. No payment is collected; the balance shown in the UI is illustrative only.
 
 `/api/claude/auth` creates PKCE state and a pushed authorization request, then redirects the browser to `auth.claude.com/oauth/authorize`. `/api/claude/callback` exchanges the code and encrypts the connection access/refresh tokens into the browser session. `/api/claude/jwks` serves the public key used by the client assertion. Claude env values are read from `.env*` on each request, so edits apply without restarting the process.
 

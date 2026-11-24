@@ -17,7 +17,10 @@ import { getClaudeSessionCredentials } from "@/lib/claude-session";
 import { getAgentPermissions, getPrimaryConnection } from "@/lib/mcp/db";
 import { mcpErrorResponse, mcpJson } from "@/lib/mcp/http";
 import { getRequestOrigin } from "@/lib/quickbooks";
-import { resolveBrowserSession } from "@/lib/mcp/session";
+import {
+  resolveBrowserSession,
+  type BrowserSession,
+} from "@/lib/mcp/session";
 import { sessionCookieHeader } from "@/lib/mcp/security";
 
 export const runtime = "nodejs";
@@ -58,8 +61,8 @@ type ExecuteBody = {
   quickBooksCounts?: string[];
 };
 
-const json = (error: string, status: number) =>
-  Response.json({ error }, { status });
+const json = (error: string, status: number, session: BrowserSession) =>
+  mcpJson({ error }, status, session);
 
 export async function POST(request: Request) {
   const session = await resolveBrowserSession(request);
@@ -80,9 +83,10 @@ export async function POST(request: Request) {
     return json(
       "A valid agent and prompt (up to 20,000 characters) are required.",
       400,
+      session,
     );
   if (files.length > 40)
-    return json("Upload up to 40 CSV or JSON files.", 400);
+    return json("Upload up to 40 CSV or JSON files.", 400, session);
   if (
     files.some(
       (file) =>
@@ -93,10 +97,14 @@ export async function POST(request: Request) {
         file.content.length > 2_000_000,
     )
   ) {
-    return json("Only CSV or JSON files up to 2 MB each are accepted.", 400);
+    return json(
+      "Only CSV or JSON files up to 2 MB each are accepted.",
+      400,
+      session,
+    );
   }
   if (files.reduce((sum, file) => sum + file.content.length, 0) > 20_000_000)
-    return json("Combined upload limit is 20 MB.", 400);
+    return json("Combined upload limit is 20 MB.", 400, session);
 
   const names = new Set<string>();
   const safeFiles = files.map((file) => {
@@ -112,7 +120,7 @@ export async function POST(request: Request) {
     return { name: safeName, content: file.content };
   });
   if (safeFiles.some((file) => file === null))
-    return json("File names must be unique and valid.", 400);
+    return json("File names must be unique and valid.", 400, session);
 
   const quickBooksCounts = Array.isArray(body?.quickBooksCounts)
     ? body.quickBooksCounts
@@ -244,7 +252,10 @@ export async function POST(request: Request) {
     },
   });
   if (session.needsCookie) {
-    response.headers.append("set-cookie", sessionCookieHeader(session.raw));
+    response.headers.append(
+      "set-cookie",
+      sessionCookieHeader(session.raw, session.secure),
+    );
   }
   return response;
 }
