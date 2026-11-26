@@ -11,7 +11,7 @@ export async function DELETE(request: Request) {
   } catch (error) {
     console.error("Agent runtime cleanup failed", error);
     return Response.json(
-      { error: "Could not clear Agent runtime history on this server." },
+      { error: "Could not clear the agent's runtime history on this server." },
       { status: 500 },
     );
   }

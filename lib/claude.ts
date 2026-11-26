@@ -31,9 +31,7 @@ export type ClaudeCredentials = {
   billingMode?: "connection" | "operator";
 };
 
-export function getClaudeConfig(
-  credentials?: ClaudeCredentials | null,
-) {
+export function getClaudeConfig(credentials?: ClaudeCredentials | null) {
   return {
     apiKey: credentials?.apiKey,
     authToken: credentials?.authToken,
@@ -490,7 +488,13 @@ export async function runClaudeAgent({
   for (let iteration = 0; iteration < MAX_ITERATIONS; iteration += 1) {
     if (signal.aborted) throw new Error("Execution cancelled.");
 
-    const response = await callClaude(messages, system, signal, tools, credentials);
+    const response = await callClaude(
+      messages,
+      system,
+      signal,
+      tools,
+      credentials,
+    );
     inputTokens += response.usage?.input_tokens ?? 0;
     outputTokens += response.usage?.output_tokens ?? 0;
 
@@ -519,11 +523,7 @@ export async function runClaudeAgent({
       try {
         if (isAgentMcpToolName(tool.name)) {
           if (!mcp) throw new Error("QuickBooks MCP is not available.");
-          const result = await callAgentMcpTool(
-            mcp,
-            tool.name,
-            tool.input,
-          );
+          const result = await callAgentMcpTool(mcp, tool.name, tool.input);
           if (result.pending) onPendingOperation?.(result.pending);
           onActivity(tool.name, result.isError ? "failed" : "completed");
           results.push({

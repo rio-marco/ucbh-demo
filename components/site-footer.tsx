@@ -1,101 +1,76 @@
 import Link from "next/link";
-import { ShieldCheck } from "lucide-react";
-import ComingSoonBadge, {
-  COMING_SOON_SURFACE,
-} from "@/components/coming-soon-badge";
+import { ArrowUpRight, ShieldCheck } from "lucide-react";
 import Logo from "@/components/logo";
-import { AGENTS } from "@/data/agents";
 
 const year = new Date().getFullYear();
 
-const PLATFORM_LINKS = [{ label: "Dashboard", href: "/" }];
+const LINK_GROUPS = [
+  {
+    title: "Platform",
+    links: [
+      { label: "Overview", href: "/" },
+      { label: "Agent profiles", href: "/#agents" },
+      { label: "How it works", href: "/#how-it-works" },
+    ],
+  },
+  {
+    title: "Legal",
+    links: [
+      { label: "Privacy policy", href: "/privacy" },
+      { label: "End user license agreement", href: "/eula" },
+    ],
+  },
+];
 
 export default function SiteFooter() {
   return (
-    <footer className="mt-auto border-t border-ink/10 bg-white/75">
-      <div className="mx-auto max-w-6xl px-5 py-9 md:py-11">
-        <div className="grid gap-9 sm:grid-cols-2 md:grid-cols-[1.5fr_0.75fr_1fr] md:gap-14">
-          <div>
-            <Link href="/" aria-label="UCBH home" className="inline-flex">
+    <footer className="mt-auto border-t border-border bg-card">
+      <div className="page-container py-12 md:py-14">
+        <div className="grid gap-10 md:grid-cols-[1.4fr_repeat(3,minmax(0,1fr))] md:gap-8">
+          <div className="max-w-sm">
+            <Link
+              href="/"
+              aria-label="UCBH home"
+              className="inline-flex rounded-lg"
+            >
               <Logo />
             </Link>
-            <p className="mt-4 max-w-sm text-[12.5px] leading-relaxed text-muted-foreground">
-              A secure workspace for running AI agents against uploaded data,
-              with each run contained in an isolated session.
+            <p className="mt-4 text-[13px] leading-relaxed text-muted-foreground">
+              A workspace for running AI agents against uploaded data and
+              QuickBooks records. Every task stays under your review.
+            </p>
+            <p className="mt-4 inline-flex items-center gap-2 text-[12px] font-medium text-foreground/70">
+              <ShieldCheck className="h-4 w-4 text-primary" />
+              Each run uses a temporary, isolated workspace.
             </p>
           </div>
 
-          <nav aria-label="Platform">
-            <p className="font-display text-xs font-bold">Platform</p>
-            <ul className="mt-4 space-y-2.5 text-[12.5px] text-muted-foreground">
-              {PLATFORM_LINKS.map((link) => (
-                <li key={link.href}>
-                  <a href={link.href} className="hover:text-ink">
-                    {link.label}
-                  </a>
-                </li>
-              ))}
-            </ul>
-          </nav>
-
-          <nav aria-label="Agents">
-            <p className="font-display text-xs font-bold">Agents</p>
-            <ul className="mt-4 space-y-2.5 text-[12.5px] text-muted-foreground">
-              {AGENTS.map((agent) => {
-                const comingSoon = Boolean(agent.comingSoon);
-                return (
-                  <li key={agent.id}>
-                    {comingSoon ? (
-                      <div
-                        aria-disabled="true"
-                        className={`inline-flex cursor-not-allowed items-center gap-2 rounded-md px-2 py-1 ${COMING_SOON_SURFACE}`}
-                      >
-                        <span
-                          className="h-1.5 w-1.5 rounded-full opacity-70"
-                          style={{ background: agent.accent }}
-                        />
-                        {agent.name}
-                        <ComingSoonBadge compact />
-                      </div>
-                    ) : (
-                      <Link
-                        href={`/agents/${agent.id}`}
-                        className="inline-flex items-center gap-2 hover:text-ink"
-                      >
-                        <span
-                          className="h-1.5 w-1.5 rounded-full"
-                          style={{ background: agent.accent }}
-                        />
-                        {agent.name}
-                        <span className="text-[10px] text-muted-foreground/70">
-                          · {agent.role}
-                        </span>
-                      </Link>
-                    )}
+          {LINK_GROUPS.map((group) => (
+            <nav key={group.title} aria-label={group.title}>
+              <p className="text-[12px] font-semibold uppercase tracking-[0.1em] text-foreground/80">
+                {group.title}
+              </p>
+              <ul className="mt-4 space-y-3">
+                {group.links.map((link) => (
+                  <li key={link.href}>
+                    <Link
+                      href={link.href}
+                      className="inline-flex items-center gap-1 text-[13px] text-muted-foreground transition-colors hover:text-foreground"
+                    >
+                      {link.label}
+                      {link.href.startsWith("http") ? (
+                        <ArrowUpRight className="h-3 w-3" />
+                      ) : null}
+                    </Link>
                   </li>
-                );
-              })}
-            </ul>
-          </nav>
+                ))}
+              </ul>
+            </nav>
+          ))}
         </div>
 
-        <div className="mt-9 flex flex-col gap-3 border-t border-ink/10 pt-5 text-[11px] text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex flex-wrap items-center gap-3">
-            <p>© {year} UCBH. All rights reserved.</p>
-            <Link className="hover:text-foreground" href="/privacy">
-              Privacy
-            </Link>
-            <Link className="hover:text-foreground" href="/eula">
-              EULA
-            </Link>
-            <Link className="hover:text-foreground" href="/disconnect">
-              Disconnect
-            </Link>
-          </div>
-          <p className="inline-flex items-center gap-1.5 leading-relaxed">
-            <ShieldCheck className="h-3.5 w-3.5 text-primary" />
-            Runs are isolated.
-          </p>
+        <div className="mt-10 flex flex-col gap-2 border-t border-border pt-6 text-[12px] text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
+          <p>© {year} UCBH. All rights reserved.</p>
         </div>
       </div>
     </footer>

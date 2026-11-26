@@ -1,26 +1,32 @@
 import Link from "next/link";
+import InfoPage from "@/components/info-page";
+import { Button } from "@/components/ui/button";
 
 export default function PrivacyPage() {
   return (
-    <main className="mx-auto flex min-h-screen w-full max-w-2xl flex-col justify-center gap-6 px-6 py-16">
-      <div className="space-y-3">
-        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-primary">
-          Legal
+    <InfoPage
+      eyebrow="Legal"
+      title="Privacy policy"
+      description="This workspace stores OAuth tokens only for the services you choose to connect. Tokens are encrypted at rest and scoped to your browser session. We do not sell your data or use it for advertising."
+    >
+      <section className="bai-card p-5 md:p-6">
+        <h2 className="font-display text-lg font-semibold">Information we store</h2>
+        <p className="mt-3 text-[13px] leading-6 text-muted-foreground">
+          Connection tokens, task details, and run summaries are kept for your
+          browser session. Generated files are available for review and are
+          removed with the temporary workspace after the run.
         </p>
-        <h1 className="text-3xl font-semibold text-ink">Privacy Policy</h1>
-        <p className="text-sm leading-7 text-muted-foreground">
-          This workspace stores OAuth tokens for the services you choose to
-          connect. Tokens are encrypted at rest and scoped to your browser
-          session. We do not sell your data or use it for advertising.
+      </section>
+      <section className="bai-card p-5 md:p-6">
+        <h2 className="font-display text-lg font-semibold">Placeholder notice</h2>
+        <p className="mt-3 text-[13px] leading-6 text-muted-foreground">
+          This is a placeholder policy. Replace it with your reviewed privacy
+          policy before submitting the Intuit production app assessment.
         </p>
-        <p className="text-sm leading-7 text-muted-foreground">
-          Replace this placeholder with your reviewed privacy policy before
-          submitting the Intuit production app assessment.
-        </p>
-      </div>
-      <Link className="text-sm text-primary underline" href="/">
-        Return to workspace
-      </Link>
-    </main>
+      </section>
+      <Button asChild variant="line">
+        <Link href="/">Return to the workspace</Link>
+      </Button>
+    </InfoPage>
   );
 }

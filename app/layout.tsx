@@ -4,13 +4,16 @@ import KeepAlivePing from "@/components/keep-alive-ping";
 import "./globals.css";
 
 export const viewport: Viewport = {
-  themeColor: "#fbfaf7",
+  themeColor: "#f7f9fc",
 };
 
 export const metadata: Metadata = {
-  title: "UCBH — AI Agent Platform",
+  title: {
+    default: "UCBH — AI Agent Workspace",
+    template: "%s | UCBH",
+  },
   description:
-    "Run Agent AI against uploaded CSV files in a temporary isolated workspace and review the results.",
+    "Run AI agents on uploaded data and QuickBooks records in an isolated workspace, then review every result before you decide.",
 };
 
 export default function RootLayout({

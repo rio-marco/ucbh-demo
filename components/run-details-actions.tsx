@@ -23,10 +23,10 @@ export default function RunDetailsActions({
   if (session.status === "rejected" && session.reviewNote.trim()) {
     return (
       <section className="bai-card border-orange-200 p-5 md:p-6">
-        <p className="label">Client decision</p>
-        <h2 className="mt-2 font-display text-xl font-bold">Result rejected</h2>
+        <p className="label">Your decision</p>
+        <h2 className="mt-2 font-display text-xl font-semibold">Result rejected</h2>
         <div className="mt-4 rounded-xl border border-orange-200 bg-orange-50 p-4">
-          <p className="font-mono text-[9px] uppercase tracking-wide text-orange-800">
+          <p className="font-mono text-[10px] uppercase tracking-wide text-orange-800">
             Review note
           </p>
           <p className="mt-2 whitespace-pre-wrap text-xs leading-relaxed text-orange-950">
@@ -40,7 +40,7 @@ export default function RunDetailsActions({
   const finish = async (status: "accepted" | "rejected") => {
     if (status === "rejected" && !note.trim()) {
       setError(
-        "Add a revision note explaining why this result is being rejected.",
+        "Add a revision note explaining why you are rejecting this result.",
       );
       return;
     }
@@ -53,7 +53,7 @@ export default function RunDetailsActions({
       );
       if (!cleaned.ok)
         throw new Error(
-          "Could not clean Agent runtime data. The run is still awaiting approval.",
+          "Could not remove the agent's runtime data. The run is still awaiting approval.",
         );
       const saved = await fetch("/api/sessions", {
         method: "POST",
@@ -90,7 +90,7 @@ export default function RunDetailsActions({
 
   const updateResult = () => {
     if (!note.trim()) {
-      setError("Write a revision note before updating the result.");
+      setError("Write a revision note before requesting an update.");
       return;
     }
     router.push(
@@ -102,18 +102,18 @@ export default function RunDetailsActions({
     <section className="bai-card p-5 md:p-6">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <p className="label">Client decision</p>
-          <h2 className="mt-2 font-display text-xl font-bold">
+          <p className="label">Your decision</p>
+          <h2 className="mt-2 font-display text-xl font-semibold">
             Review and choose an action
           </h2>
         </div>
         <span
-          className={`rounded-full border px-2.5 py-1 text-[9px] ${isReview ? "border-amber-200 bg-amber-50 text-amber-800" : "border-ink/10 bg-paper text-muted-foreground"}`}
+          className={`rounded-full border px-2.5 py-1 text-[10px] ${isReview ? "border-amber-200 bg-amber-50 text-amber-800" : "border-ink/10 bg-paper text-muted-foreground"}`}
         >
           {isReview ? "Decision needed" : "Decision recorded"}
         </span>
       </div>
-      <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">
+      <p className="mt-2 text-[12px] leading-relaxed text-muted-foreground">
         Read the agent response and task files before deciding. Add a note when
         rejecting or requesting an update.
       </p>
@@ -121,9 +121,9 @@ export default function RunDetailsActions({
         className="mt-4 block text-xs font-semibold"
         htmlFor="run-review-note"
       >
-        Review note{" "}
+        Revision note{" "}
         <span className="font-normal text-muted-foreground">
-          (required for Reject and Update Result)
+          (required to reject or request an update)
         </span>
       </label>
       <textarea
@@ -158,7 +158,7 @@ export default function RunDetailsActions({
             )}
             Reject
           </Button>
-          <p className="mt-2 text-[10px] leading-relaxed text-muted-foreground">
+          <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">
             Decline this result, save your reason, and close the run after
             cleanup.
           </p>
@@ -171,9 +171,9 @@ export default function RunDetailsActions({
             disabled={!isReview || busy || !note.trim() || !canUpdate}
           >
             <RotateCcw className="h-3.5 w-3.5" />
-            Update Result
+             Request an update
           </Button>
-          <p className="mt-2 text-[10px] leading-relaxed text-muted-foreground">
+          <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">
             Send your note and the saved task files back to the agent for
             another run.
           </p>
@@ -191,15 +191,15 @@ export default function RunDetailsActions({
             )}
             Accept
           </Button>
-          <p className="mt-2 text-[10px] leading-relaxed text-muted-foreground">
+          <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">
             Approve this result, record your decision, and complete cleanup.
           </p>
         </div>
       </div>
       {!canUpdate && isReview && (
-        <p className="mt-3 text-[10px] text-muted-foreground">
-          Saved input files are unavailable, so Update Result is disabled for
-          this run.
+        <p className="mt-3 text-[11px] text-muted-foreground">
+          Saved input files are unavailable, so requesting an update is not
+          possible for this run.
         </p>
       )}
     </section>

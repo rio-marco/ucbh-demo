@@ -89,7 +89,7 @@ export type ClaudeAuthDoc = {
   session_id: string;
   user_id: string;
   email: string | null;
-  mode: "oauth" | "demo";
+  mode: "oauth";
   connection_id: string | null;
   access_token: EncryptedCredential | null;
   refresh_token: EncryptedCredential | null;
@@ -154,21 +154,25 @@ function asDate(value: unknown): Date {
 
 function prune(store: Store): void {
   const now = Date.now();
-  store.sessions = store.sessions.filter((item) => item.expires_at.getTime() > now);
+  store.sessions = store.sessions.filter(
+    (item) => item.expires_at.getTime() > now,
+  );
   store.states = store.states.filter((item) => item.expires_at.getTime() > now);
   store.tokens = store.tokens.filter((item) => item.expires_at.getTime() > now);
-  store.pending = store.pending.filter((item) => item.expires_at.getTime() > now);
+  store.pending = store.pending.filter(
+    (item) => item.expires_at.getTime() > now,
+  );
   store.claudeStates = store.claudeStates.filter(
     (item) => item.expires_at.getTime() > now,
   );
-  const activeSessions = new Set(
-    store.sessions.map((item) => item.session_id),
-  );
+  const activeSessions = new Set(store.sessions.map((item) => item.session_id));
   store.permissions = store.permissions.filter((item) =>
     activeSessions.has(item.session_id),
   );
   store.audit = store.audit
-    .filter((item) => now - item.created_at.getTime() < 90 * 24 * 60 * 60 * 1000)
+    .filter(
+      (item) => now - item.created_at.getTime() < 90 * 24 * 60 * 60 * 1000,
+    )
     .slice(-2000);
 }
 
@@ -195,7 +199,10 @@ async function readStore(): Promise<Store> {
   const parsed = JSON.parse(raw) as Record<string, Record<string, unknown>[]>;
   const store: Store = {
     sessions: (parsed.sessions || []).map((item) => ({
-      ...(item as unknown as Omit<BrowserSessionDoc, "created_at" | "updated_at" | "expires_at">),
+      ...(item as unknown as Omit<
+        BrowserSessionDoc,
+        "created_at" | "updated_at" | "expires_at"
+      >),
       created_at: asDate(item.created_at),
       updated_at: asDate(item.updated_at),
       expires_at: asDate(item.expires_at),
@@ -221,12 +228,17 @@ async function readStore(): Promise<Store> {
       >),
       access_token_expires_at: asDate(item.access_token_expires_at),
       refresh_token_expires_at: asDate(item.refresh_token_expires_at),
-      refresh_lock_at: item.refresh_lock_at ? asDate(item.refresh_lock_at) : null,
+      refresh_lock_at: item.refresh_lock_at
+        ? asDate(item.refresh_lock_at)
+        : null,
       created_at: asDate(item.created_at),
       updated_at: asDate(item.updated_at),
     })),
     pending: (parsed.pending || []).map((item) => ({
-      ...(item as unknown as Omit<PendingOperationDoc, "created_at" | "expires_at">),
+      ...(item as unknown as Omit<
+        PendingOperationDoc,
+        "created_at" | "expires_at"
+      >),
       created_at: asDate(item.created_at),
       expires_at: asDate(item.expires_at),
     })),
@@ -252,10 +264,7 @@ async function readStore(): Promise<Store> {
       updated_at: asDate(item.updated_at),
     })),
     claudeStates: (parsed.claudeStates || []).map((item) => ({
-      ...(item as unknown as Omit<
-        ClaudeStateDoc,
-        "created_at" | "expires_at"
-      >),
+      ...(item as unknown as Omit<ClaudeStateDoc, "created_at" | "expires_at">),
       created_at: asDate(item.created_at),
       expires_at: asDate(item.expires_at),
     })),
@@ -299,8 +308,9 @@ async function withStore<T>(fn: (store: Store) => T | Promise<T>): Promise<T> {
 export async function getBrowserSession(
   sessionHash: string,
 ): Promise<BrowserSessionDoc | null> {
-  return withStore((store) =>
-    store.sessions.find((item) => item.session_id === sessionHash) ?? null,
+  return withStore(
+    (store) =>
+      store.sessions.find((item) => item.session_id === sessionHash) ?? null,
   );
 }
 
@@ -333,7 +343,9 @@ export async function touchBrowserSession(
   ttlSeconds: number,
 ): Promise<void> {
   await withStore((store) => {
-    const record = store.sessions.find((item) => item.session_id === sessionHash);
+    const record = store.sessions.find(
+      (item) => item.session_id === sessionHash,
+    );
     if (!record) return;
     record.updated_at = new Date();
     record.expires_at = new Date(Date.now() + ttlSeconds * 1000);
@@ -432,7 +444,8 @@ export async function saveQuickBooksConnection(
     const now = new Date();
     let record = store.connections.find(
       (item) =>
-        item.session_id === input.sessionHash && item.realm_id === input.realmId,
+        item.session_id === input.sessionHash &&
+        item.realm_id === input.realmId,
     );
     if (!record) {
       record = {
@@ -501,8 +514,7 @@ export async function getConnection(
   return withStore(
     (store) =>
       store.connections.find(
-        (item) =>
-          item.session_id === sessionHash && item.realm_id === realmId,
+        (item) => item.session_id === sessionHash && item.realm_id === realmId,
       ) ?? null,
   );
 }
@@ -531,7 +543,8 @@ export async function setPrimaryConnection(
     );
     if (!target) return false;
     for (const item of store.connections) {
-      if (item.session_id === sessionHash) item.is_primary = item.id === target.id;
+      if (item.session_id === sessionHash)
+        item.is_primary = item.id === target.id;
     }
     target.updated_at = new Date();
     return true;
@@ -615,7 +628,8 @@ export async function acquireRefreshLock(
   return withStore((store) => {
     const record = store.connections.find((item) => item.id === id);
     if (!record) return false;
-    const stale = !record.refresh_lock_at ||
+    const stale =
+      !record.refresh_lock_at ||
       record.refresh_lock_at.getTime() < Date.now() - 60_000;
     if (record.refresh_lock_id && !stale) return false;
     record.refresh_lock_id = lockId;
@@ -834,11 +848,7 @@ export async function saveClaudeOAuthTokens(input: {
       "claude-oauth",
     );
     record.refresh_token = input.refreshToken
-      ? encryptCredential(
-          input.refreshToken,
-          input.sessionHash,
-          "claude-oauth",
-        )
+      ? encryptCredential(input.refreshToken, input.sessionHash, "claude-oauth")
       : null;
     record.scopes = input.scopes;
     record.access_token_expires_at = input.accessTokenExpiresAt;
@@ -873,8 +883,8 @@ export async function getClaudeOAuthTokens(
 }
 
 export async function hasClaudeAuth(sessionHash: string): Promise<boolean> {
-  return withStore(
-    (store) => store.claudeAuth.some((item) => item.session_id === sessionHash),
+  return withStore((store) =>
+    store.claudeAuth.some((item) => item.session_id === sessionHash),
   );
 }
 
@@ -932,4 +942,3 @@ export async function clearAgentPermissions(
     );
   });
 }
-

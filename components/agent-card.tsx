@@ -1,8 +1,6 @@
 import Link from "next/link";
 import { ArrowUpRight, Check } from "lucide-react";
-import ComingSoonBadge, {
-  COMING_SOON_SURFACE,
-} from "@/components/coming-soon-badge";
+import ComingSoonBadge from "@/components/coming-soon-badge";
 import type { Agent } from "@/lib/types";
 
 export default function AgentCard({ agent }: { agent: Agent }) {
@@ -10,71 +8,50 @@ export default function AgentCard({ agent }: { agent: Agent }) {
 
   const content = (
     <>
-      <div className="flex items-start justify-between">
+      <div className="flex items-start justify-between gap-3">
         <span
-          className={`grid h-11 w-11 place-items-center rounded-xl border font-display text-[19px] font-bold ${
-            comingSoon
-              ? "border-white/25 text-white"
-              : "border-ink/10 text-ink shadow-sm"
-          }`}
-          style={{ background: `${agent.accent}55` }}
+          className="grid h-11 w-11 shrink-0 place-items-center rounded-xl border border-border font-display text-lg font-bold text-foreground"
+          style={{ background: `${agent.accent}1A` }}
         >
           {agent.name[0]}
         </span>
         <span
-          className={
+          className={`inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-medium ${
             comingSoon
-              ? "rounded-full border border-white/25 bg-white/10 px-2.5 py-1 font-mono text-[9.5px] font-medium uppercase tracking-[0.08em] text-white/80"
-              : "chip"
-          }
+              ? "bg-muted text-muted-foreground"
+              : "bg-primary/5 text-primary"
+          }`}
         >
-          {comingSoon ? "Upcoming" : "Agent AI"}
+          {comingSoon ? "Coming soon" : "Available"}
         </span>
       </div>
-      <h3 className="mt-4 font-display text-[24px] font-bold leading-none">
-        {agent.name}
-      </h3>
-      <p
-        className={`mt-1.5 font-mono text-[9px] uppercase tracking-[0.14em] ${
-          comingSoon ? "text-blue-100/80" : "text-muted-foreground"
-        }`}
-      >
+
+      <h3 className="mt-5 font-display text-lg font-semibold">{agent.name}</h3>
+      <p className="mt-1 text-[12px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
         {agent.role}
       </p>
-      <p
-        className={`mt-3 flex-1 text-[12.5px] leading-relaxed ${
-          comingSoon ? "text-blue-100/80" : "text-ink/60"
-        }`}
-      >
+      <p className="mt-3 flex-1 text-[13px] leading-6 text-muted-foreground">
         {agent.tagline}
       </p>
-      <ul className="mt-4 space-y-1.5">
+
+      <ul className="mt-4 space-y-2">
         {agent.capabilities.map((capability) => (
           <li
             key={capability}
-            className={`flex items-center gap-2 text-[12px] ${
-              comingSoon ? "text-blue-50/85" : "text-ink/65"
-            }`}
+            className="flex items-center gap-2 text-[12.5px] text-foreground/75"
           >
-            <span
-              className={`grid h-3.5 w-3.5 place-items-center rounded-full ${
-                comingSoon
-                  ? "bg-emerald-300/20 text-emerald-200"
-                  : "bg-emerald-500/10 text-emerald-700"
-              }`}
-            >
+            <span className="grid h-4 w-4 shrink-0 place-items-center rounded-full bg-emerald-500/10 text-emerald-700">
               <Check className="h-2.5 w-2.5" />
             </span>
             {capability}
           </li>
         ))}
       </ul>
+
       {!comingSoon && (
-        <div className="mt-5 flex items-center justify-end border-t border-ink/8 pt-4">
-          <span className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-ink/10 bg-white px-2.5 py-1.5 text-[11.5px] font-medium shadow-sm transition-colors group-hover:border-primary/25 group-hover:text-primary">
-            View agent
-            <ArrowUpRight className="h-3.5 w-3.5" />
-          </span>
+        <div className="mt-5 flex items-center justify-between border-t border-border pt-4 text-[13px] font-semibold text-primary">
+          View agent
+          <ArrowUpRight className="h-4 w-4" />
         </div>
       )}
     </>
@@ -84,11 +61,10 @@ export default function AgentCard({ agent }: { agent: Agent }) {
     return (
       <div
         aria-disabled="true"
-        className={`relative flex cursor-not-allowed flex-col overflow-hidden rounded-[1.45rem] p-5 shadow-md ${COMING_SOON_SURFACE}`}
+        className="relative flex cursor-not-allowed flex-col rounded-xl border border-dashed border-border bg-muted/30 p-5"
       >
-        <div className="pointer-events-none absolute -right-12 -top-12 h-36 w-36 rounded-full bg-white/10 blur-2xl" />
-        <div className="flex flex-col opacity-40">{content}</div>
-        <div className="pointer-events-none absolute inset-0 grid place-items-center bg-blue-950/25">
+        <div className="flex flex-col opacity-55">{content}</div>
+        <div className="pointer-events-none absolute inset-0 grid place-items-center">
           <ComingSoonBadge />
         </div>
       </div>
@@ -98,7 +74,7 @@ export default function AgentCard({ agent }: { agent: Agent }) {
   return (
     <Link
       href={`/agents/${agent.id}`}
-      className="bai-card bai-lift group flex flex-col overflow-hidden p-5"
+      className="bai-card bai-lift group flex flex-col p-5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
     >
       {content}
     </Link>

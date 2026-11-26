@@ -33,7 +33,7 @@ export function QuickBooksAccountAction({ action }: { action: Action }) {
       const response = await fetch("/api/quickbooks/status", {
         method: "DELETE",
       });
-      if (!response.ok) throw new Error("Disconnect failed.");
+      if (!response.ok) throw new Error("Could not disconnect QuickBooks.");
       await fetch("/api/mcp/connector/status", { method: "DELETE" }).catch(
         () => undefined,
       );
@@ -53,7 +53,9 @@ export function QuickBooksAccountAction({ action }: { action: Action }) {
     <div className="flex flex-col items-start gap-3">
       <Button onClick={() => void run()} disabled={busy}>
         {busy
-          ? "Working…"
+          ? action === "connect"
+            ? "Connecting…"
+            : "Disconnecting…"
           : action === "connect"
             ? "Connect QuickBooks"
             : "Disconnect QuickBooks"}

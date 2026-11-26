@@ -43,11 +43,7 @@ export async function GET(request: Request) {
 
     await saveClaudeOAuthState({
       stateHash: hashClaudeOAuthState(state),
-      codeVerifier: encryptCredential(
-        verifier,
-        session.hash,
-        "claude-pkce",
-      ),
+      codeVerifier: encryptCredential(verifier, session.hash, "claude-pkce"),
       sessionHash: session.hash,
       returnTo,
       redirectUri,

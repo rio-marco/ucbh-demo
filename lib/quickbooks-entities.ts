@@ -7,12 +7,48 @@ export type QuickBooksRecordDefinition = {
 };
 
 export const QB_RECORD_DEFINITIONS: QuickBooksRecordDefinition[] = [
-  { entity: "Customer", key: "customers", label: "Customers", file: "quickbooks-customers.csv", canUpdate: true },
-  { entity: "Vendor", key: "vendors", label: "Vendors", file: "quickbooks-vendors.csv", canUpdate: true },
-  { entity: "Employee", key: "employees", label: "Employees", file: "quickbooks-employees.csv", canUpdate: true },
-  { entity: "Invoice", key: "invoices", label: "Invoices", file: "quickbooks-invoices.csv", canUpdate: true },
-  { entity: "Bill", key: "bills", label: "Bills", file: "quickbooks-bills.csv", canUpdate: false },
-  { entity: "SalesOrder", key: "salesOrders", label: "Sales Orders", file: "quickbooks-sales-orders.csv", canUpdate: false },
+  {
+    entity: "Customer",
+    key: "customers",
+    label: "Customers",
+    file: "quickbooks-customers.csv",
+    canUpdate: true,
+  },
+  {
+    entity: "Vendor",
+    key: "vendors",
+    label: "Vendors",
+    file: "quickbooks-vendors.csv",
+    canUpdate: true,
+  },
+  {
+    entity: "Employee",
+    key: "employees",
+    label: "Employees",
+    file: "quickbooks-employees.csv",
+    canUpdate: true,
+  },
+  {
+    entity: "Invoice",
+    key: "invoices",
+    label: "Invoices",
+    file: "quickbooks-invoices.csv",
+    canUpdate: true,
+  },
+  {
+    entity: "Bill",
+    key: "bills",
+    label: "Bills",
+    file: "quickbooks-bills.csv",
+    canUpdate: false,
+  },
+  {
+    entity: "SalesOrder",
+    key: "salesOrders",
+    label: "Sales Orders",
+    file: "quickbooks-sales-orders.csv",
+    canUpdate: false,
+  },
 ];
 
 export const QB_UPDATABLE_ENTITIES = new Set(
@@ -84,8 +120,7 @@ export function parseQuickBooksUpdates(input: unknown): {
     }
     const operation = item as Record<string, unknown>;
     const requestedEntity = asText(operation.entity);
-    const entity =
-      QB_ENTITY_ALIASES.get(requestedEntity.toLowerCase()) ?? "";
+    const entity = QB_ENTITY_ALIASES.get(requestedEntity.toLowerCase()) ?? "";
     const id = asText(operation.id ?? operation.Id);
     const syncToken = asText(operation.syncToken ?? operation.SyncToken);
     const fieldsInput = operation.fields ?? operation.data;

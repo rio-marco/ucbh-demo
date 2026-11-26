@@ -66,7 +66,7 @@ function StatusBadge({ status }: { status: SessionStatus }) {
   const meta = STATUS_META[status];
   return (
     <span
-      className={`inline-flex items-center rounded-full border px-2 py-1 text-[10px] font-medium ${meta.styles}`}
+      className={`inline-flex items-center rounded-full border px-2 py-1 text-[11px] font-medium ${meta.styles}`}
     >
       {meta.label}
     </span>
@@ -105,13 +105,13 @@ export function CleanupDialog({
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-2">
-          <div className="flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2.5 text-[10.5px] leading-relaxed text-red-800">
+          <div className="flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2.5 text-[12px] leading-relaxed text-red-800">
             <DatabaseZap className="mt-0.5 h-3.5 w-3.5 shrink-0" />
             <span>
               Removes the run’s saved Agent thread and runtime history.
             </span>
           </div>
-          <div className="flex items-start gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2.5 text-[10.5px] leading-relaxed text-emerald-900">
+          <div className="flex items-start gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2.5 text-[12px] leading-relaxed text-emerald-900">
             <ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0" />
             <span>
               Keeps the session summary, token totals, result, and status in run
@@ -174,20 +174,20 @@ export default function SessionHistory({
         <span className="grid h-9 w-9 place-items-center rounded-xl bg-primary/10 text-primary">
           <History className="h-4 w-4" />
         </span>
-        {/* <div>
-          <p className="text-sm font-semibold">Run history</p>
-          <p className="mt-0.5 text-[10.5px] text-muted-foreground">
-            {sessions.length} run{sessions.length === 1 ? "" : "s"} · review and
-            inspect previous results
+        <div>
+          <p className="text-[13px] font-semibold">Run history</p>
+          <p className="mt-0.5 text-[11px] text-muted-foreground">
+            {sessions.length} run{sessions.length === 1 ? "" : "s"} · review
+            previous results
           </p>
-        </div> */}
+        </div>
       </div>
       {sessions.length === 0 ? (
         <div className="px-5 py-10 text-center">
           <p className="text-xs font-medium text-muted-foreground">
-            No agent sessions yet
+            No runs yet
           </p>
-          <p className="mx-auto mt-1 max-w-sm text-[10.5px] leading-relaxed text-muted-foreground">
+          <p className="mx-auto mt-1 max-w-sm text-[12px] leading-relaxed text-muted-foreground">
             Your runs, prompts, usage, and review status will appear here.
           </p>
         </div>
@@ -195,7 +195,7 @@ export default function SessionHistory({
         <div className="overflow-x-auto">
           <table className="w-full min-w-[1050px] border-collapse text-left">
             <thead className="bg-paper/70">
-              <tr className="font-mono text-[9px] uppercase tracking-[0.12em] text-muted-foreground">
+              <tr className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
                 {[
                   "Run",
                   "Brief",
@@ -226,7 +226,7 @@ export default function SessionHistory({
                       <FileText className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
                       <div className="min-w-0">
                         <p
-                          className="truncate text-[11px] font-semibold"
+                          className="truncate text-[12px] font-semibold"
                           title={session.files
                             .map((file) => file.name)
                             .join(", ")}
@@ -234,7 +234,7 @@ export default function SessionHistory({
                           {session.files[0]?.name || session.title}
                         </p>
                         <p
-                          className="mt-1 truncate font-mono text-[9px] text-muted-foreground"
+                          className="mt-1 truncate font-mono text-[10px] text-muted-foreground"
                           title={session.id}
                         >
                           Run-{session.id}
@@ -244,26 +244,26 @@ export default function SessionHistory({
                   </td>
                   <td className="max-w-[230px] px-4 py-3">
                     <p
-                      className="line-clamp-2 text-[11px] leading-relaxed text-ink/75"
+                      className="line-clamp-2 text-[12px] leading-relaxed text-ink/75"
                       title={session.prompt}
                     >
                       {session.prompt || session.title}
                     </p>
                   </td>
-                  <td className="whitespace-nowrap px-4 py-3 text-[11px]">
+                  <td className="whitespace-nowrap px-4 py-3 text-[12px]">
                     {session.environment === "private" ? "Private" : "Shared"}
                   </td>
-                  <td className="whitespace-nowrap px-4 py-3 text-[11px] tabular-nums">
+                  <td className="whitespace-nowrap px-4 py-3 text-[12px] tabular-nums">
                     {number(session.totalTokens)}
                   </td>
-                  <td className="whitespace-nowrap px-4 py-3 text-[11px] tabular-nums">
+                  <td className="whitespace-nowrap px-4 py-3 text-[12px] tabular-nums">
                     {money(session.fee)}
                   </td>
                   <td className="whitespace-nowrap px-4 py-3">
                     <StatusBadge status={session.status} />
                   </td>
                   <td
-                    className="whitespace-nowrap px-4 py-3 text-[10px] text-muted-foreground"
+                    className="whitespace-nowrap px-4 py-3 text-[11px] text-muted-foreground"
                     title={formatSessionDate(session.createdAt)}
                   >
                     {formatSessionDate(session.createdAt)}
@@ -302,13 +302,13 @@ export default function SessionHistory({
       >
         <DialogContent className="max-w-sm rounded-2xl">
           <DialogHeader>
-            <DialogTitle className="font-display text-lg">
+            <DialogTitle className="font-display text-lg font-semibold">
               Delete run?
             </DialogTitle>
-            {/* <DialogDescription>
+            <DialogDescription>
               This removes {deleteTarget?.id} from run history. This cannot be
               undone.
-            </DialogDescription> */}
+            </DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <Button

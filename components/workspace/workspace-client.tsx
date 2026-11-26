@@ -28,7 +28,7 @@ import {
   UploadCloud,
   X,
 } from "lucide-react";
-import SessionHistory, { CleanupDialog } from "@/components/session-history";
+import { CleanupDialog } from "@/components/session-history";
 import AgentResult from "@/components/agent-result";
 import SiteHeader from "@/components/site-header";
 import { Button } from "@/components/ui/button";
@@ -63,8 +63,8 @@ type Stage =
   | "review"
   | "complete";
 type StreamEvent = { type: string; data: Record<string, any> };
-const DEMO_RATES = { inputPerThousand: 0.25, outputPerThousand: 1.1 };
-const DEMO_STARTING_BALANCE = 1000;
+const CURRENT_RATES = { inputPerThousand: 0.25, outputPerThousand: 1.1 };
+const CURRENT_STARTING_BALANCE = 1000;
 const MAX_TASK_FILES = 40;
 const MAX_TASK_FILE_BYTES = 2_000_000;
 const MAX_TASK_TOTAL_BYTES = 20_000_000;
@@ -88,7 +88,7 @@ const CLAUDE_ERROR_MESSAGES: Record<string, string> = {
     "Claude did not return the expected details. Please try again.",
   token_exchange: "Claude could not complete the login. Please try again.",
   invalid_scope:
-    "Claude rejected the requested scopes. Check CLAUDE_OAUTH_SCOPES and the OAuth app's allowed scopes.",
+    "Claude rejected the requested permissions. Review the OAuth app's allowed scopes and try again.",
   configuration: "Claude login is not configured on this server.",
 };
 
@@ -111,22 +111,22 @@ const PERMISSION_OPTIONS: {
   {
     key: "read",
     title: "View company data",
-    detail: "Read customers, invoices, vendors and other listed records.",
+    detail: "Read customers, invoices, vendors, and other supported records.",
   },
   {
     key: "create",
     title: "Create records",
-    detail: "Add new customers, invoices, bills and other supported records.",
+    detail: "Add new customers, invoices, bills, and other supported records.",
   },
   {
     key: "update",
     title: "Update records",
-    detail: "Change existing records with your review before write-back.",
+    detail: "Update existing records after you review each change.",
   },
   {
     key: "delete",
     title: "Void or delete records",
-    detail: "Void transactions and remove records when the agent proposes it.",
+    detail: "Void transactions or remove records when the agent proposes it.",
   },
 ];
 
@@ -155,7 +155,7 @@ function PendingQuickBooksOperations({
           <ShieldCheck className="mt-0.5 h-4 w-4 text-primary" />
           <div>
             <p className="label">QuickBooks write-back</p>
-            <h2 className="mt-1 font-display text-lg font-bold">
+            <h2 className="mt-1 font-display text-lg font-semibold">
               Review proposed changes
             </h2>
           </div>
@@ -172,7 +172,7 @@ function PendingQuickBooksOperations({
               {operation.entity}
               {operation.recordId ? ` #${operation.recordId}` : ""}
             </p>
-            <pre className="mt-2 max-h-40 overflow-auto rounded-lg bg-white p-3 font-mono text-[10px] leading-relaxed text-ink/80">
+            <pre className="mt-2 max-h-40 overflow-auto rounded-lg bg-white p-3 font-mono text-[11px] leading-relaxed text-ink/80">
               {JSON.stringify(operation.fields, null, 2)}
             </pre>
             <div className="mt-3 flex flex-wrap gap-2">
@@ -335,14 +335,14 @@ function QuickBooksPushPanel({
     <div className="bai-card p-5 md:p-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <p className="label text-[#1F7A14]">QuickBooks write-back</p>
-          <h3 className="mt-1.5 font-display text-base font-bold">
-            Proposed record updates
+          <p className="label">QuickBooks write-back</p>
+          <h3 className="mt-1.5 font-display text-base font-semibold">
+            Proposed record changes
           </h3>
-          <p className="mt-1 max-w-xl text-[11px] leading-relaxed text-muted-foreground">
-            The agent proposed {operations.length} update
+          <p className="mt-1 max-w-xl text-[13px] leading-relaxed text-muted-foreground">
+            The agent proposed {operations.length} change
             {operations.length === 1 ? "" : "s"} to existing QuickBooks records.
-            Review the exact fields before writing.
+            Review the exact fields before applying them.
           </p>
         </div>
         <Button
@@ -350,26 +350,26 @@ function QuickBooksPushPanel({
           disabled={!connected || !operations.length || Boolean(parsed.error)}
         >
           <Send className="h-3.5 w-3.5" />
-          Review &amp; push
+          Review changes
         </Button>
       </div>
 
       {parsed.error && (
-        <div className="mt-3 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-800">
+        <div className="mt-3 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] text-amber-800">
           <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-          {parsed.error} The updates will not be sent.
+          {parsed.error} No changes will be applied.
         </div>
       )}
 
       {!connected && (
-        <p className="mt-3 text-[11px] text-amber-700">
-          Reconnect QuickBooks on the task screen to enable write-back.
+        <p className="mt-3 text-[13px] text-amber-700">
+          Reconnect QuickBooks on the task screen to enable updates.
         </p>
       )}
 
       {results && (
         <div className="mt-3 rounded-lg border border-ink/8 bg-white p-3">
-          <p className="text-[11px] font-semibold">
+          <p className="text-[12px] font-semibold">
             {succeeded} updated · {failed} failed
           </p>
           {failed > 0 && (
@@ -379,7 +379,7 @@ function QuickBooksPushPanel({
                 .map((item) => (
                   <li
                     key={`${item.entity}-${item.id}`}
-                    className="text-[10.5px] leading-relaxed text-red-600"
+                    className="text-[12px] leading-relaxed text-red-600"
                   >
                     {item.entity} #{item.id}: {item.error}
                   </li>
@@ -387,9 +387,9 @@ function QuickBooksPushPanel({
             </ul>
           )}
           {succeeded > 0 && (
-            <p className="mt-2 text-[10.5px] text-emerald-700">
-              QuickBooks was updated. Re-import the QuickBooks data to refresh
-              your local snapshot.
+            <p className="mt-2 text-[13px] text-emerald-700">
+              QuickBooks was updated. Re-import your data to refresh the local
+              snapshot.
             </p>
           )}
         </div>
@@ -398,10 +398,12 @@ function QuickBooksPushPanel({
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl">
           <DialogHeader>
-            <DialogTitle>Push updates to QuickBooks</DialogTitle>
+            <DialogTitle className="font-display text-xl font-semibold">
+              Apply changes in QuickBooks
+            </DialogTitle>
             <DialogDescription>
-              These changes will be applied to your connected QuickBooks company
-              immediately. Review every operation first.
+              These changes will be applied to your connected QuickBooks
+              company. Review each operation before continuing.
             </DialogDescription>
           </DialogHeader>
 
@@ -411,26 +413,26 @@ function QuickBooksPushPanel({
                 key={`${operation.entity}-${operation.id}-${index}`}
                 className="rounded-lg border border-ink/8 bg-white p-3"
               >
-                <p className="font-mono text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                  {operation.entity} · Id {operation.id} · SyncToken{" "}
+                <p className="font-mono text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  {operation.entity} · ID {operation.id} · SyncToken{" "}
                   {operation.syncToken}
                 </p>
-                <pre className="mt-1.5 max-h-32 overflow-auto whitespace-pre-wrap break-words font-mono text-[10px] leading-relaxed text-ink/80">
+                <pre className="mt-1.5 max-h-32 overflow-auto whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-ink/80">
                   {JSON.stringify(operation.fields, null, 2)}
                 </pre>
               </div>
             ))}
           </div>
 
-          <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[10.5px] leading-relaxed text-amber-800">
+          <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[13px] leading-relaxed text-amber-800">
             <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-            This updates existing records only and is sandbox-only by default.
-            Updates use each record&apos;s SyncToken; stale tokens or invalid
-            fields are rejected by QuickBooks per record.
+            Only existing records are updated, and sandbox companies are used by
+            default. Each change requires the record&apos;s current SyncToken;
+            stale tokens or invalid fields are rejected by QuickBooks.
           </div>
 
           {error && (
-            <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[11px] text-red-600">
+            <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[12px] text-red-600">
               {error}
             </p>
           )}
@@ -446,8 +448,8 @@ function QuickBooksPushPanel({
                 <Send className="h-3.5 w-3.5" />
               )}
               {pushing
-                ? "Pushing…"
-                : `Push ${operations.length} update${operations.length === 1 ? "" : "s"}`}
+                ? "Applying…"
+                : `Apply ${operations.length} change${operations.length === 1 ? "" : "s"}`}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -509,7 +511,9 @@ export default function WorkspaceClient({
   const [outputs, setOutputs] = useState<OutputFile[]>([]);
   const [usage, setUsage] = useState<Record<string, number> | null>(null);
   const [error, setError] = useState("");
-  const [demoBalance, setDemoBalance] = useState(DEMO_STARTING_BALANCE);
+  const [currentBalance, setCurrentBalance] = useState(
+    CURRENT_STARTING_BALANCE,
+  );
   const [paymentOpen, setPaymentOpen] = useState(false);
   const [agentReady, setAgentReady] = useState<boolean | null>(null);
   const [agentReadyReason, setAgentReadyReason] = useState<string | null>(null);
@@ -554,15 +558,15 @@ export default function WorkspaceClient({
   const estimatedCharge = Math.max(
     1,
     Math.ceil(
-      ((inputEstimate / 1000) * DEMO_RATES.inputPerThousand +
-        (outputEstimate / 1000) * DEMO_RATES.outputPerThousand) *
+      ((inputEstimate / 1000) * CURRENT_RATES.inputPerThousand +
+        (outputEstimate / 1000) * CURRENT_RATES.outputPerThousand) *
         100,
     ) / 100,
   );
   const steps = [
     "Agent & task",
     "Environment",
-    "Estimate & pay",
+    "Estimate",
     "Agent run",
     "Review",
   ];
@@ -700,7 +704,7 @@ export default function WorkspaceClient({
     } catch {
       setMcpConnected(false);
       setMcpError(
-        "The MCP Connector is unavailable. Please try again shortly.",
+        "The QuickBooks MCP connection is unavailable. Please try again shortly.",
       );
       return false;
     }
@@ -778,7 +782,7 @@ export default function WorkspaceClient({
 
   const connectMcp = async () => {
     if (!claudeConnected) {
-      setMcpError("Connect Claude CoWork first.");
+      setMcpError("Connect Claude CoWork before connecting the MCP server.");
       return;
     }
     setMcpError("");
@@ -806,7 +810,7 @@ export default function WorkspaceClient({
       }
       if (data.connected) {
         setMcpConnected(true);
-        setMcpNotice("MCP connected successfully.");
+        setMcpNotice("QuickBooks MCP connected.");
         await refreshMcpStatus();
         return;
       }
@@ -895,7 +899,7 @@ export default function WorkspaceClient({
     }
     if (!permissionScopes.includes("read")) {
       setError(
-        "Allow View company data so the agent can read QuickBooks records.",
+        "Enable View company data so the agent can read QuickBooks records.",
       );
       return;
     }
@@ -950,7 +954,7 @@ export default function WorkspaceClient({
       );
       setActivities((items) => [
         ...items,
-        `QuickBooks write-back ${confirm ? "confirmed" : "rejected"}`,
+        `QuickBooks change ${confirm ? "confirmed" : "rejected"}`,
       ]);
     } catch (confirmError) {
       setError(
@@ -967,7 +971,7 @@ export default function WorkspaceClient({
       const response = await fetch("/api/quickbooks/status", {
         method: "DELETE",
       });
-      if (!response.ok) throw new Error("Disconnect failed");
+      if (!response.ok) throw new Error("Could not disconnect QuickBooks.");
       await fetch("/api/mcp/connector/status", { method: "DELETE" }).catch(
         () => undefined,
       );
@@ -1066,7 +1070,7 @@ export default function WorkspaceClient({
       const mcpReady = await refreshMcpStatus();
       if (cancelled) return;
       if (mcpReady) {
-        setMcpNotice("MCP connected successfully.");
+        setMcpNotice("QuickBooks MCP connected.");
       }
       await refreshClaudeStatus();
       if (cancelled) return;
@@ -1158,16 +1162,6 @@ export default function WorkspaceClient({
     }
   };
 
-  const deleteSessionRecord = async (id: string) => {
-    try {
-      await fetch(`/api/sessions?id=${encodeURIComponent(id)}`, {
-        method: "DELETE",
-      });
-    } finally {
-      setSessions((current) => current.filter((item) => item.id !== id));
-    }
-  };
-
   const cleanupAgentHistory = async () => {
     setError("");
     try {
@@ -1176,12 +1170,14 @@ export default function WorkspaceClient({
         { method: "DELETE" },
       );
       if (!response.ok) {
-        setError("Could not clean Agent runtime data. Please try again.");
+        setError(
+          "Could not remove the agent's runtime data. Please try again.",
+        );
         return;
       }
       setCleanupDone(true);
     } catch {
-      setError("Could not clean Agent runtime data. Please try again.");
+      setError("Could not remove the agent's runtime data. Please try again.");
     }
   };
 
@@ -1257,7 +1253,7 @@ export default function WorkspaceClient({
     }
     if (revisionNote.trim()) setPrompt(runPrompt);
     setPaymentOpen(false);
-    setDemoBalance((balance) => Math.max(0, balance - estimatedCharge));
+    setCurrentBalance((balance) => Math.max(0, balance - estimatedCharge));
     const runSessionId = revisionNote.trim()
       ? activeSessionId
       : createSessionId();
@@ -1288,7 +1284,7 @@ export default function WorkspaceClient({
       ...(revisionNote.trim() ? ["Revision requested"] : []),
       "Workspace provisioned",
       `${runFiles.length} task file${runFiles.length === 1 ? "" : "s"} loaded`,
-      "Agent started prompt analysis",
+      "Agent started analyzing the prompt",
     ];
     const saved = await persistSession({
       id: runSessionId,
@@ -1396,7 +1392,7 @@ export default function WorkspaceClient({
       );
       if (abort.signal.aborted) {
         setError(
-          "Execution cancelled. Adjust the task if needed, then run the agent again.",
+          "The run was cancelled. Update the task if needed, then run it again.",
         );
         setStage("estimate");
         await persistSession({
@@ -1447,7 +1443,7 @@ export default function WorkspaceClient({
     } catch (reason) {
       if (abort.signal.aborted) {
         setError(
-          "Execution cancelled. Adjust the task if needed, then run the agent again.",
+          "The run was cancelled. Update the task if needed, then run it again.",
         );
         setStage("estimate");
         await persistSession({
@@ -1510,7 +1506,7 @@ export default function WorkspaceClient({
     const note = rejectNote.trim();
     if (!note) {
       setError(
-        "Add a revision note explaining why this result is being rejected.",
+        "Add a revision note explaining why you are rejecting this result.",
       );
       return;
     }
@@ -1563,7 +1559,7 @@ export default function WorkspaceClient({
   const cancelExecution = () => {
     abortRef.current?.abort();
     setError(
-      "Execution cancelled. Adjust the task if needed, then run the agent again.",
+      "The run was cancelled. Update the task if needed, then run it again.",
     );
     setStage("estimate");
   };
@@ -1571,90 +1567,48 @@ export default function WorkspaceClient({
   return (
     <div className="min-h-screen">
       <SiteHeader
+        navigation={false}
         actions={
           <>
             <Link
               href={`/agents/${agent.id}`}
-              className="hidden text-xs text-muted-foreground hover:text-ink sm:inline"
+              className="hidden text-[13px] font-medium text-muted-foreground transition-colors hover:text-foreground sm:inline"
             >
               Agent details
             </Link>
             <Link
               href="/"
-              className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-ink"
+              className="inline-flex items-center gap-1.5 text-[13px] font-medium text-muted-foreground transition-colors hover:text-foreground"
             >
               <ArrowLeft className="h-3.5 w-3.5" />
-              Dashboard
+              Overview
             </Link>
           </>
         }
       >
-        <span className="hidden h-6 w-px bg-ink/10 sm:block" />
         <div className="min-w-0">
-          <p className="truncate text-[12.5px] font-semibold">
+          <p className="truncate text-[13px] font-semibold">
             {agent.name}{" "}
             <span className="font-normal text-muted-foreground">
               · {agent.role}
             </span>
           </p>
-          <p className="mt-1 truncate font-mono text-[8.5px] uppercase tracking-[0.12em] text-muted-foreground">
-            Agent AI · {activeSessionId}
+          <p className="mt-1 truncate font-mono text-[11px] uppercase tracking-[0.1em] text-muted-foreground">
+            Workspace · {activeSessionId}
           </p>
         </div>
       </SiteHeader>
 
-      <main className="mx-auto max-w-6xl px-5 py-8 md:py-11">
-        <div className="grid gap-6 lg:grid-cols-[255px_minmax(0,1fr)] lg:gap-8">
+      <main className="page-container py-8 md:py-11">
+        <div className="grid gap-6 lg:grid-cols-[240px_minmax(0,1fr)] lg:gap-8">
           <aside className="space-y-3 lg:sticky lg:top-24 lg:h-max">
             <Link
               href={`/agents/${agent.id}`}
-              className="flex items-center justify-between rounded-xl border border-ink/10 bg-white/70 px-3 py-2.5 text-[11px] text-muted-foreground transition-colors hover:border-primary/30 hover:text-ink"
+              className="flex items-center justify-between rounded-lg border border-border bg-card px-3 py-2.5 text-[13px] text-muted-foreground transition-colors hover:border-primary/30 hover:text-foreground"
             >
-              Back to agent details
+              Agent details
               <ArrowLeft className="h-3.5 w-3.5" />
             </Link>
-            {/* <div className="bai-card p-4">
-              <div className="flex items-center justify-between">
-                <p className="label">Agent process</p>
-                <span className="font-display text-lg font-bold">
-                  {processProgress}%
-                </span>
-              </div>
-              <div className="mt-3 h-2 overflow-hidden rounded-full bg-ink/8">
-                <div
-                  className={`h-full rounded-full transition-all duration-500 ${processDone ? "bg-emerald-500" : "bg-primary"}`}
-                  style={{ width: `${processProgress}%` }}
-                />
-              </div>
-              <p className="mt-2 text-[10px] leading-relaxed text-muted-foreground">
-                {processRunning
-                  ? `${processEventCount} process event${processEventCount === 1 ? "" : "s"} completed`
-                  : processDone
-                    ? "Agent process complete."
-                    : "Waiting for agent to start the uploaded files and prompt."}
-              </p>
-              <dl className="mt-3 space-y-1.5 text-[10px]">
-                <div className="flex justify-between gap-2">
-                  <dt className="text-muted-foreground">Session</dt>
-                  <dd className="truncate font-mono">{activeSessionId}</dd>
-                </div>
-                <div className="flex justify-between">
-                  <dt className="text-muted-foreground">Tokens</dt>
-                  <dd>
-                    {usage
-                      ? (
-                          (usage.input_tokens ?? 0) + (usage.output_tokens ?? 0)
-                        ).toLocaleString()
-                      : "—"}
-                  </dd>
-                </div>
-                <div className="flex justify-between">
-                  <dt className="text-muted-foreground">Outputs</dt>
-                  <dd>{outputs.length}</dd>
-                </div>
-              </dl>
-            </div> */}
-
             <div className="bai-card p-4">
               <p className="label">Workflow steps</p>
               <ol className="mt-4 space-y-3">
@@ -1662,14 +1616,18 @@ export default function WorkspaceClient({
                   const done = index < completedSteps;
                   const current = index === activeStep && stage !== "complete";
                   return (
-                    <li key={label} className="flex items-center gap-3">
+                    <li
+                      key={label}
+                      aria-current={current ? "step" : undefined}
+                      className="flex items-center gap-3"
+                    >
                       <span
-                        className={`grid h-7 w-7 shrink-0 place-items-center rounded-full border text-[11px] ${done ? "border-primary bg-primary text-white" : current ? "border-primary bg-primary/10 font-semibold text-primary" : "border-ink/15 text-muted-foreground"}`}
+                        className={`grid h-7 w-7 shrink-0 place-items-center rounded-full border text-[12px] ${done ? "border-primary bg-primary text-white" : current ? "border-primary bg-primary/10 font-semibold text-primary" : "border-border text-muted-foreground"}`}
                       >
                         {done ? <Check className="h-3.5 w-3.5" /> : index + 1}
                       </span>
                       <span
-                        className={`text-xs ${current ? "font-semibold text-ink" : done ? "text-ink/70" : "text-muted-foreground"}`}
+                        className={`text-[13px] ${current ? "font-semibold text-foreground" : done ? "text-foreground/75" : "text-muted-foreground"}`}
                       >
                         {label}
                       </span>
@@ -1686,37 +1644,41 @@ export default function WorkspaceClient({
                 Step {String(activeStep + 1).padStart(2, "0")} ·{" "}
                 {steps[activeStep]}
               </p>
-              <h1 className="mt-2 font-display text-3xl font-bold md:text-[38px]">
+              <h1 className="mt-2 font-display text-3xl font-semibold tracking-tight md:text-[36px]">
                 {stage === "task"
                   ? "Prepare your task"
                   : stage === "runtime"
-                    ? "Choose where Agent runs"
+                    ? "Choose where the agent runs"
                     : stage === "estimate"
                       ? "Review the estimate"
                       : stage === "running"
-                        ? "Working in an isolated workspace"
+                        ? "Running in an isolated workspace"
                         : stage === "complete"
                           ? sessions.find(
                               (session) => session.id === activeSessionId,
                             )?.status === "rejected"
                             ? "Result rejected"
-                            : "Task accepted"
-                          : "Review Agent’s result"}
+                            : "Result accepted"
+                          : "Review the agent's result"}
               </h1>
               <p className="mt-2 max-w-2xl text-[13px] leading-relaxed text-muted-foreground">
                 {stage === "task"
-                  ? "Connect Claude and your QuickBooks MCP, choose the agent's permissions, then prepare files and a prompt."
-                  : stage === "running"
-                    ? "Agent AI is executing your task inside a temporary sandbox. Follow the pipeline and live trace below."
-                    : "Your prompt and files are sent to Agent AI only after you confirm the payment."}
+                  ? "Connect Claude CoWork and the QuickBooks MCP connection, choose permissions, then prepare your files and brief."
+                  : stage === "runtime"
+                    ? "Select the environment for this run. Both options use a temporary, isolated workspace."
+                    : stage === "estimate"
+                      ? "Confirm the estimated charge before the agent starts."
+                      : stage === "running"
+                        ? "The agent is working in a temporary sandbox. Follow the progress and activity below."
+                        : "Your prompt and files are sent to the agent only after you confirm the run."}
               </p>
             </div>
             {(stage === "review" || stage === "complete") && (
               <div className="bai-card p-5">
                 <div className="flex items-center gap-2">
                   <GitBranch className="h-4 w-4 text-primary" />
-                  <p className="text-xs font-semibold">Run trace · pipeline</p>
-                  <span className="ml-auto font-mono text-[9px] text-muted-foreground">
+                  <p className="text-[13px] font-semibold">Run progress</p>
+                  <span className="ml-auto font-mono text-[10px] text-muted-foreground">
                     {activeSessionId}
                   </span>
                 </div>
@@ -1734,10 +1696,10 @@ export default function WorkspaceClient({
                         {step.done ? <Check className="h-3 w-3" /> : index + 1}
                       </span>
                       <span className="min-w-0">
-                        <span className="block text-[10.5px] font-semibold">
+                        <span className="block text-[12px] font-semibold">
                           {step.label}
                         </span>
-                        <span className="mt-1 block text-[9px] leading-relaxed text-muted-foreground">
+                        <span className="mt-1 block text-[10px] leading-relaxed text-muted-foreground">
                           {step.detail}
                         </span>
                       </span>
@@ -1755,11 +1717,11 @@ export default function WorkspaceClient({
               </div>
             )}
             {agentReady === false && agentReadyReason !== "auth" && (
-              <div className="flex items-start gap-2 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-xs leading-relaxed text-amber-950">
+              <div className="flex items-start gap-2 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-[13px] leading-relaxed text-amber-950">
                 <LockKeyhole className="mt-0.5 h-4 w-4 shrink-0" />
                 <span>
-                  Something went wrong please try again later or contact the
-                  administrator
+                  The agent service is unavailable right now. Try again later or
+                  contact your administrator.
                 </span>
               </div>
             )}
@@ -1770,20 +1732,20 @@ export default function WorkspaceClient({
                   <div className="flex flex-wrap items-start justify-between gap-4 border-b border-ink/8 p-5 md:p-6">
                     <div className="flex items-start gap-4">
                       <span
-                        className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl text-white shadow-sm"
-                        style={{ background: agent.accent }}
+                        className="grid h-11 w-11 shrink-0 place-items-center rounded-xl border border-border text-foreground"
+                        style={{ background: `${agent.accent}1A` }}
                       >
                         <Sparkles className="h-5 w-5" />
                       </span>
                       <div>
-                        <p className="font-display text-xl font-bold">
+                        <p className="font-display text-lg font-semibold">
                           {agent.name}
-                          <span className="ml-2 align-middle font-sans text-[9px] font-medium uppercase tracking-[0.1em] text-muted-foreground">
+                          <span className="ml-2 align-middle font-sans text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
                             {agent.role}
                           </span>
                         </p>
-                        <p className="mt-1 max-w-xl text-xs leading-relaxed text-muted-foreground">
-                          {agent.tagline} Executed by Agent AI.
+                        <p className="mt-1 max-w-xl text-[13px] leading-relaxed text-muted-foreground">
+                          {agent.tagline}
                         </p>
                       </div>
                     </div>
@@ -1807,39 +1769,47 @@ export default function WorkspaceClient({
 
                 {taskView === "setup" ? (
                   <>
-                    {/* <div className="bai-card flex flex-wrap gap-1.5 p-1.5">
+                    {/* <div
+                      role="tablist"
+                      aria-label="Task setup"
+                      className="flex gap-1 rounded-lg border border-border bg-muted/40 p-1"
+                    >
                       <button
                         type="button"
                         role="tab"
+                        id="tab-connections"
+                        aria-controls="task-setup-panel"
                         aria-selected={taskTab === "mcp"}
                         onClick={() => setTaskTab("mcp")}
-                        className={`flex flex-1 items-center justify-center gap-2 rounded-xl px-4 py-3 text-xs font-semibold transition-all ${
+                        className={`flex flex-1 items-center justify-center gap-2 rounded-md px-3 py-2 text-[13px] font-medium transition-colors ${
                           taskTab === "mcp"
-                            ? "bg-primary text-white shadow-sm"
-                            : "text-muted-foreground hover:bg-paper hover:text-ink"
+                            ? "bg-card text-foreground shadow-sm"
+                            : "text-muted-foreground hover:text-foreground"
                         }`}
                       >
                         <Bot className="h-4 w-4" />
-                        MCP Connections
+                        Connections
                         {claudeConnected && mcpConnected && (
-                          <CheckCircle2 className="h-3.5 w-3.5" />
+                          <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
                         )}
                       </button>
                       <button
                         type="button"
                         role="tab"
+                        id="tab-upload"
+                        aria-controls="task-setup-panel"
                         aria-selected={taskTab === "upload"}
                         onClick={() => setTaskTab("upload")}
-                        className={`flex flex-1 items-center justify-center gap-2 rounded-xl px-4 py-3 text-xs font-semibold transition-all ${
+                        className={`flex flex-1 items-center justify-center gap-2 rounded-md px-3 py-2 text-[13px] font-medium transition-colors ${
                           taskTab === "upload"
-                            ? "bg-primary text-white shadow-sm"
-                            : "text-muted-foreground hover:bg-paper hover:text-ink"
+                            ? "bg-card text-foreground shadow-sm"
+                            : "text-muted-foreground hover:text-foreground"
                         }`}
                       >
                         <UploadCloud className="h-4 w-4" />
-                        Upload Files
+                        Upload files
                         {files.length > 0 && (
-                          <span className="rounded-full bg-white/20 px-1.5 py-0.5 font-mono text-[9px]">
+                          <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[11px] font-semibold text-primary">
                             {files.length}
                           </span>
                         )}
@@ -1847,18 +1817,23 @@ export default function WorkspaceClient({
                     </div> */}
 
                     {taskTab === "mcp" ? (
-                      <div className="space-y-4 anim-in">
+                      <div
+                        id="task-setup-panel"
+                        role="tabpanel"
+                        aria-labelledby="tab-connections"
+                        className="space-y-4 anim-in"
+                      >
                         <div className="bai-card p-5 md:p-6">
                           <div className="flex flex-wrap items-start justify-between gap-3">
                             <div>
                               <p className="label">Connection checklist</p>
-                              <h2 className="mt-2 font-display text-xl font-bold">
-                                Connect your own accounts
+                              <h2 className="mt-2 font-display text-xl font-semibold">
+                                Connect your accounts
                               </h2>
-                              <p className="mt-1 max-w-xl text-[11px] leading-relaxed text-muted-foreground">
-                                Connect Claude CoWork first, then the QuickBook
-                                MCP connection, then set QuickBooks permission.
-                                Each step belongs to this browser session.
+                              <p className="mt-1 max-w-xl text-[13px] leading-relaxed text-muted-foreground">
+                                Connect Claude CoWork, then the QuickBooks MCP
+                                connection, then choose what the agent may do.
+                                Each connection belongs to this browser session.
                               </p>
                             </div>
                             <span className="chip">
@@ -1882,7 +1857,7 @@ export default function WorkspaceClient({
                                   <Bot className="h-4 w-4" />
                                 </span>
                                 <span
-                                  className={`font-mono text-[9px] uppercase tracking-wide ${claudeConnected ? "text-emerald-700" : "text-muted-foreground"}`}
+                                  className={`font-mono text-[10px] uppercase tracking-wide ${claudeConnected ? "text-emerald-700" : "text-muted-foreground"}`}
                                 >
                                   {claudeConnected ? "Connected" : "Step 01"}
                                 </span>
@@ -1890,7 +1865,7 @@ export default function WorkspaceClient({
                               <p className="mt-3 text-xs font-semibold">
                                 Claude CoWork
                               </p>
-                              <p className="mt-1 text-[10.5px] leading-relaxed text-muted-foreground">
+                              <p className="mt-1 text-[12px] leading-relaxed text-muted-foreground">
                                 Sign in with your Claude organization. The
                                 approval happens on Claude, then this browser
                                 returns here for MCP access.
@@ -1899,7 +1874,7 @@ export default function WorkspaceClient({
                                 type="button"
                                 onClick={() => void connectClaude()}
                                 disabled={claudeConnected || claudeConnecting}
-                                className={`mt-3 flex w-full items-center justify-center gap-2 rounded-xl px-3 py-2 text-[11px] font-semibold text-white transition ${
+                                className={`mt-3 flex w-full items-center justify-center gap-2 rounded-xl px-3 py-2 text-[12px] font-semibold text-white transition ${
                                   claudeConnected
                                     ? "cursor-default bg-emerald-600 opacity-100"
                                     : "bg-primary hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
@@ -1919,7 +1894,7 @@ export default function WorkspaceClient({
                                     : "Connect Claude CoWork"}
                               </button>
                               {claudeError && (
-                                <p className="mt-2 flex items-start gap-1.5 text-[10px] leading-relaxed text-red-600">
+                                <p className="mt-2 flex items-start gap-1.5 text-[11px] leading-relaxed text-red-600">
                                   <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
                                   {claudeError}
                                 </p>
@@ -1934,29 +1909,29 @@ export default function WorkspaceClient({
                                   <DatabaseZap className="h-4 w-4" />
                                 </span>
                                 <span
-                                  className={`font-mono text-[9px] uppercase tracking-wide ${mcpConnected ? "text-emerald-700" : "text-muted-foreground"}`}
+                                  className={`font-mono text-[10px] uppercase tracking-wide ${mcpConnected ? "text-emerald-700" : "text-muted-foreground"}`}
                                 >
                                   {mcpConnected ? "Connected" : "Step 02"}
                                 </span>
                               </div>
                               <p className="mt-3 text-xs font-semibold">
-                                QuickBook MCP
+                                QuickBooks MCP
                               </p>
-                              <p className="mt-1 text-[10.5px] leading-relaxed text-muted-foreground">
-                                Link the secure MCP server to your QuickBooks
-                                company so the agent can read the approved data.
+                              <p className="mt-1 text-[12px] leading-relaxed text-muted-foreground">
+                                Link the MCP server to your QuickBooks company
+                                so the agent can read the data you approve.
                               </p>
                               {!claudeConnected ? (
-                                <p className="mt-3 flex items-center gap-2 rounded-xl border border-dashed border-ink/15 bg-white/60 px-3 py-2.5 text-[10.5px] leading-relaxed text-muted-foreground">
+                                <p className="mt-3 flex items-center gap-2 rounded-xl border border-dashed border-ink/15 bg-white/60 px-3 py-2.5 text-[12px] leading-relaxed text-muted-foreground">
                                   <LockKeyhole className="h-3.5 w-3.5 shrink-0" />
-                                  Waiting for Claude CoWork connection
+                                  Waiting for the Claude CoWork connection
                                 </p>
                               ) : (
                                 <button
                                   type="button"
                                   onClick={() => void connectMcp()}
                                   disabled={mcpConnecting || mcpConnected}
-                                  className={`mt-3 flex w-full items-center justify-center gap-2 rounded-xl border px-3 py-2 text-[11px] font-semibold transition ${
+                                  className={`mt-3 flex w-full items-center justify-center gap-2 rounded-xl border px-3 py-2 text-[12px] font-semibold transition ${
                                     mcpConnected
                                       ? "cursor-default border-emerald-600 bg-emerald-600 opacity-100 text-white"
                                       : "border-ink/15 bg-white text-ink hover:border-primary/30 hover:shadow-sm disabled:cursor-not-allowed disabled:opacity-60"
@@ -1970,21 +1945,21 @@ export default function WorkspaceClient({
                                     <ArrowRight className="h-3.5 w-3.5" />
                                   )}
                                   {mcpConnected
-                                    ? "QuickBook MCP connected"
+                                    ? "QuickBooks MCP connected"
                                     : mcpConnecting
                                       ? "Connecting…"
-                                      : "QuickBook MCP connect"}
+                                      : "Connect QuickBooks MCP"}
                                 </button>
                               )}
                               {mcpConnected && (
-                                <p className="mt-2 truncate text-[9.5px] text-emerald-700">
+                                <p className="mt-2 truncate text-[10.5px] text-emerald-700">
                                   {mcpNotice ||
                                     qbCompanyName ||
-                                    "MCP connected successfully."}
+                                    "QuickBooks MCP connected."}
                                 </p>
                               )}
                               {mcpError && (
-                                <p className="mt-2 flex items-start gap-1.5 text-[10px] leading-relaxed text-red-600">
+                                <p className="mt-2 flex items-start gap-1.5 text-[11px] leading-relaxed text-red-600">
                                   <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
                                   {mcpError}
                                 </p>
@@ -1999,7 +1974,7 @@ export default function WorkspaceClient({
                                   <ShieldCheck className="h-4 w-4" />
                                 </span>
                                 <span
-                                  className={`font-mono text-[9px] uppercase tracking-wide ${permissionGranted ? "text-emerald-700" : "text-muted-foreground"}`}
+                                  className={`font-mono text-[10px] uppercase tracking-wide ${permissionGranted ? "text-emerald-700" : "text-muted-foreground"}`}
                                 >
                                   {permissionGranted ? "Approved" : "Step 03"}
                                 </span>
@@ -2007,22 +1982,22 @@ export default function WorkspaceClient({
                               <p className="mt-3 text-xs font-semibold">
                                 QuickBooks permission
                               </p>
-                              <p className="mt-1 text-[10.5px] leading-relaxed text-muted-foreground">
+                              <p className="mt-1 text-[12px] leading-relaxed text-muted-foreground">
                                 Decide what the agent is allowed to do in
                                 QuickBooks Online before you continue.
                               </p>
                               {!claudeConnected || !mcpConnected ? (
-                                <p className="mt-3 flex items-center gap-2 rounded-xl border border-dashed border-ink/15 bg-white/60 px-3 py-2.5 text-[10.5px] leading-relaxed text-muted-foreground">
+                                <p className="mt-3 flex items-center gap-2 rounded-xl border border-dashed border-ink/15 bg-white/60 px-3 py-2.5 text-[12px] leading-relaxed text-muted-foreground">
                                   <LockKeyhole className="h-3.5 w-3.5 shrink-0" />
                                   {!claudeConnected
-                                    ? "Waiting for Claude CoWork connection"
-                                    : "Waiting for QuickBook MCP connection"}
+                                    ? "Waiting for the Claude CoWork connection"
+                                    : "Waiting for the QuickBooks MCP connection"}
                                 </p>
                               ) : (
                                 <button
                                   type="button"
                                   onClick={() => setPermissionOpen(true)}
-                                  className={`mt-3 flex w-full items-center justify-center gap-2 rounded-xl border px-3 py-2 text-[11px] font-semibold transition ${
+                                  className={`mt-3 flex w-full items-center justify-center gap-2 rounded-xl border px-3 py-2 text-[12px] font-semibold transition ${
                                     permissionGranted
                                       ? "cursor-default border-emerald-600 bg-emerald-600 opacity-100 text-white"
                                       : "border-ink/15 bg-white text-ink hover:border-primary/30 hover:shadow-sm"
@@ -2039,7 +2014,7 @@ export default function WorkspaceClient({
                                 </button>
                               )}
                               {permissionGranted && (
-                                <p className="mt-2 truncate text-[9.5px] text-emerald-700">
+                                <p className="mt-2 truncate text-[10.5px] text-emerald-700">
                                   {permissionScopes
                                     .map(
                                       (key) =>
@@ -2055,9 +2030,10 @@ export default function WorkspaceClient({
                           </div>
 
                           <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-ink/8 pt-4">
-                            <p className="max-w-md text-[10.5px] leading-relaxed text-muted-foreground">
-                              Disconnecting clears Claude CoWork, QuickBook MCP
-                              and the QuickBooks permission for this browser.
+                            <p className="max-w-md text-[13px] leading-relaxed text-muted-foreground">
+                              Disconnecting removes Claude CoWork, the
+                              QuickBooks connection, and permissions for this
+                              browser.
                             </p>
                             <Button
                               variant="line"
@@ -2076,21 +2052,26 @@ export default function WorkspaceClient({
                               )}
                               {disconnectingAll
                                 ? "Disconnecting…"
-                                : "Disconnect"}
+                                : "Disconnect all"}
                             </Button>
                           </div>
                         </div>
                       </div>
                     ) : (
-                      <div className="grid gap-4 anim-in xl:grid-cols-[1.1fr_0.9fr]">
+                      <div
+                        id="task-setup-panel"
+                        role="tabpanel"
+                        aria-labelledby="tab-upload"
+                        className="grid gap-4 anim-in xl:grid-cols-[1.1fr_0.9fr]"
+                      >
                         <div className="bai-card p-5 md:p-6">
                           <div className="flex items-start justify-between gap-3">
                             <div>
                               <p className="label">Task files</p>
-                              <h2 className="mt-2 font-display text-xl font-bold">
+                              <h2 className="mt-2 font-display text-xl font-semibold">
                                 Upload your data
                               </h2>
-                              <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
+                              <p className="mt-1 text-[12px] leading-relaxed text-muted-foreground">
                                 CSV files · up to {MAX_TASK_FILES} files,{" "}
                                 {Math.round(MAX_TASK_TOTAL_BYTES / 1_000_000)}{" "}
                                 MB total
@@ -2098,17 +2079,21 @@ export default function WorkspaceClient({
                             </div>
                             <UploadCloud className="h-5 w-5 text-primary" />
                           </div>
-                          <label className="mt-4 flex cursor-pointer flex-col items-center rounded-2xl border border-dashed border-ink/20 bg-paper/60 px-5 py-10 text-center transition-colors hover:border-primary/40 hover:bg-primary/[0.03]">
+                          <label
+                            htmlFor="task-files"
+                            className="mt-4 flex cursor-pointer flex-col items-center rounded-xl border border-dashed border-input bg-muted/30 px-5 py-10 text-center transition-colors hover:border-primary/40 hover:bg-primary/[0.03]"
+                          >
                             <UploadCloud className="h-7 w-7 text-primary" />
                             <span className="mt-3 text-xs font-semibold">
                               Drop files here or browse
                             </span>
-                            <span className="mt-1 text-[10px] text-muted-foreground">
+                            <span className="mt-1 text-[11px] text-muted-foreground">
                               CSV files,{" "}
                               {Math.round(MAX_TASK_FILE_BYTES / 1_000_000)} MB
                               maximum each
                             </span>
                             <input
+                              id="task-files"
                               className="sr-only"
                               type="file"
                               multiple
@@ -2126,10 +2111,10 @@ export default function WorkspaceClient({
                                   className="flex items-center gap-2 rounded-lg border border-ink/8 px-2.5 py-2"
                                 >
                                   <FileText className="h-3.5 w-3.5 text-primary" />
-                                  <span className="min-w-0 flex-1 truncate text-[11px]">
+                                  <span className="min-w-0 flex-1 truncate text-[12px]">
                                     {file.name}
                                   </span>
-                                  <span className="font-mono text-[9px] text-muted-foreground">
+                                  <span className="font-mono text-[10px] text-muted-foreground">
                                     {(file.size / 1024).toFixed(0)} KB
                                   </span>
                                   <button
@@ -2147,31 +2132,30 @@ export default function WorkspaceClient({
                               ))}
                             </ul>
                           ) : (
-                            <p className="mt-4 rounded-xl border border-dashed border-ink/10 px-3 py-3 text-center text-[10.5px] text-muted-foreground">
-                              No files uploaded yet.
+                            <p className="mt-4 rounded-xl border border-dashed border-ink/10 px-3 py-3 text-center text-[12px] text-muted-foreground">
+                              No files added yet.
                             </p>
                           )}
                         </div>
 
                         <div className="bai-card overflow-hidden">
-                          <div className="border-b border-ink/8 px-5 py-4">
-                            <p className="label">Instructions</p>
-                            <h3 className="mt-2 font-display text-base font-bold">
-                              Read-only mode
+                          <div className="border-b border-border px-5 py-4">
+                            <p className="label">Good to know</p>
+                            <h3 className="mt-2 font-display text-base font-semibold">
+                              About uploaded files
                             </h3>
                           </div>
-                          <div className="p-4">
-                            <ol className="mt-4 space-y-2.5">
+                          <div className="p-5">
+                            <ol className="space-y-4">
                               {[
-                                "A file gives Claude something to reason over, but no tools to call. Link QuickBooks MCP and Claude Cowork when the client wants the work happening inside QuickBooks Online.",
-                                "No write tools, no approval queue for changes",
-                                "The pack still returns findings and a full set of actions",
+                                "Add CSV files with the data you want the agent to review. File-only tasks return findings and recommended actions without changing records.",
+                                "To work directly in QuickBooks Online, connect Claude CoWork and the QuickBooks MCP connection on the Connections tab.",
                               ].map((item, index) => (
                                 <li
                                   key={item}
-                                  className="flex items-start gap-2.5 text-[11px] leading-relaxed text-muted-foreground"
+                                  className="flex items-start gap-2.5 text-[13px] leading-relaxed text-muted-foreground"
                                 >
-                                  <span className="grid h-5 w-5 shrink-0 place-items-center rounded-full bg-primary/10 font-mono text-[9px] font-semibold text-primary">
+                                  <span className="grid h-5 w-5 shrink-0 place-items-center rounded-full bg-primary/10 font-mono text-[11px] font-semibold text-primary">
                                     {index + 1}
                                   </span>
                                   {item}
@@ -2184,18 +2168,18 @@ export default function WorkspaceClient({
                     )}
 
                     <div className="bai-card flex flex-wrap items-center justify-between gap-4 p-4 md:p-5">
-                      <div className="flex flex-wrap items-center gap-2 text-[10px]">
+                      <div className="flex flex-wrap items-center gap-2 text-[12px]">
                         <span className="chip">
                           <Bot className="h-3 w-3" />
-                          Claude {claudeConnected ? "ready" : "pending"}
+                          Claude {claudeConnected ? "connected" : "pending"}
                         </span>
                         <span className="chip">
                           <DatabaseZap className="h-3 w-3" />
-                          QuickBook {mcpConnected ? "ready" : "pending"}
+                          QuickBooks {mcpConnected ? "connected" : "pending"}
                         </span>
                         <span className="chip">
                           <ShieldCheck className="h-3 w-3" />
-                          Permission {permissionGranted ? "set" : "pending"}
+                          Permissions {permissionGranted ? "set" : "pending"}
                         </span>
                         <span className="chip">
                           <FileText className="h-3 w-3" />
@@ -2219,12 +2203,12 @@ export default function WorkspaceClient({
                     <div className="flex flex-wrap items-start justify-between gap-3">
                       <div>
                         <p className="label">Final step · task prompt</p>
-                        <h2 className="mt-2 font-display text-xl font-bold">
+                        <h2 className="mt-2 font-display text-xl font-semibold">
                           What should {agent.name} do?
                         </h2>
-                        <p className="mt-1 max-w-xl text-[11px] leading-relaxed text-muted-foreground">
+                        <p className="mt-1 max-w-xl text-[13px] leading-relaxed text-muted-foreground">
                           Describe the outcome you need. Your connections,
-                          permission and files are already prepared.
+                          permissions, and files are ready.
                         </p>
                       </div>
                       <Button
@@ -2236,15 +2220,19 @@ export default function WorkspaceClient({
                         Back to setup
                       </Button>
                     </div>
+                    <label htmlFor="task-prompt" className="sr-only">
+                      Task prompt
+                    </label>
                     <textarea
-                      className="mt-5 min-h-[240px] w-full resize-y rounded-xl border border-ink/12 bg-white/80 p-3.5 text-[12px] leading-relaxed outline-none transition focus:border-primary/40 focus:ring-2 focus:ring-primary/10"
+                      id="task-prompt"
+                      className="field-input mt-5 min-h-[220px] resize-y"
                       placeholder="Describe the outcome you need…"
                       value={prompt}
                       maxLength={20000}
                       onChange={(event) => setPrompt(event.target.value)}
                     />
                     <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
-                      <p className="font-mono text-[9px] text-muted-foreground">
+                      <p className="font-mono text-[10px] text-muted-foreground">
                         {prompt.length.toLocaleString()} / 20,000
                       </p>
                       <Button
@@ -2279,14 +2267,14 @@ export default function WorkspaceClient({
                         <CheckCircle2 className="h-5 w-5 text-primary" />
                       )}
                     </div>
-                    <p className="mt-4 font-display text-lg font-bold">
+                    <p className="mt-4 font-display text-lg font-semibold">
                       Shared server
                     </p>
                     <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
                       Shared application host with an isolated temporary
                       workspace for each task.
                     </p>
-                    <p className="mt-4 font-mono text-[9px] uppercase tracking-wide text-muted-foreground">
+                    <p className="mt-4 font-mono text-[10px] uppercase tracking-wide text-muted-foreground">
                       Standard · per-run workspace
                     </p>
                   </button>
@@ -2303,14 +2291,14 @@ export default function WorkspaceClient({
                         <CheckCircle2 className="h-5 w-5 text-primary" />
                       )}
                     </div>
-                    <p className="mt-4 font-display text-lg font-bold">
+                    <p className="mt-4 font-display text-lg font-semibold">
                       Private workspace
                     </p>
                     <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
                       A separate temporary workspace for this task. Network
                       access is disabled during execution.
                     </p>
-                    <p className="mt-4 font-mono text-[9px] uppercase tracking-wide text-muted-foreground">
+                    <p className="mt-4 font-mono text-[10px] uppercase tracking-wide text-muted-foreground">
                       Enhanced isolation · per-run workspace
                     </p>
                   </button>
@@ -2334,7 +2322,7 @@ export default function WorkspaceClient({
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
                       <p className="label">Run estimate</p>
-                      <h2 className="mt-2 font-display text-xl font-bold">
+                      <h2 className="mt-2 font-display text-xl font-semibold">
                         {agent.name} ·{" "}
                         {runtime === "private"
                           ? "Private workspace"
@@ -2352,45 +2340,45 @@ export default function WorkspaceClient({
                   </div>
                   <div className="mt-5 grid gap-3 sm:grid-cols-3">
                     <div className="rounded-xl bg-paper/80 p-4">
-                      <p className="font-mono text-[9px] uppercase tracking-wide text-muted-foreground">
+                      <p className="font-mono text-[10px] uppercase tracking-wide text-muted-foreground">
                         Estimated input
                       </p>
-                      <p className="mt-2 font-display text-xl font-bold">
+                      <p className="mt-2 font-display text-xl font-semibold">
                         ~{inputEstimate.toLocaleString()}
                       </p>
-                      <p className="mt-1 text-[10px] text-muted-foreground">
+                      <p className="mt-1 text-[11px] text-muted-foreground">
                         tokens · prompt + files
                       </p>
                     </div>
                     <div className="rounded-xl bg-paper/80 p-4">
-                      <p className="font-mono text-[9px] uppercase tracking-wide text-muted-foreground">
+                      <p className="font-mono text-[10px] uppercase tracking-wide text-muted-foreground">
                         Estimated output
                       </p>
-                      <p className="mt-2 font-display text-xl font-bold">
+                      <p className="mt-2 font-display text-xl font-semibold">
                         ~{outputEstimate.toLocaleString()}
                       </p>
-                      <p className="mt-1 text-[10px] text-muted-foreground">
+                      <p className="mt-1 text-[11px] text-muted-foreground">
                         tokens · planning estimate
                       </p>
                     </div>
                     <div className="rounded-xl border border-primary/15 bg-primary/[0.04] p-4">
-                      <p className="font-mono text-[9px] uppercase tracking-wide text-secondary-foreground">
-                        Charge
+                      <p className="font-mono text-[11px] uppercase tracking-wide text-secondary-foreground">
+                        Estimated charge
                       </p>
-                      <p className="mt-2 font-display text-xl font-bold">
+                      <p className="mt-2 font-display text-xl font-semibold">
                         {money(estimatedCharge)}
                       </p>
                     </div>
                   </div>
                   <div className="mt-4 flex items-start gap-2 rounded-xl border border-ink/8 px-3.5 py-3">
                     <CircleDollarSign className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
-                    <p className="text-[10.5px] leading-relaxed text-muted-foreground">
-                      Token counts are planning estimates: a Agent runtime
-                      allowance plus prompt and file size for input, and a small
-                      prompt-based output allowance. Rates:{" "}
-                      {money(DEMO_RATES.inputPerThousand)} per 1K input tokens
-                      and {money(DEMO_RATES.outputPerThousand)} per 1K output
-                      tokens.
+                    <p className="text-[13px] leading-relaxed text-muted-foreground">
+                      Token counts are planning estimates: an agent runtime
+                      allowance plus prompt and file size for input, and a
+                      prompt-based allowance for output. Rates are{" "}
+                      {money(CURRENT_RATES.inputPerThousand)} per 1,000 input
+                      tokens and {money(CURRENT_RATES.outputPerThousand)} per
+                      1,000 output tokens.
                     </p>
                   </div>
                 </div>
@@ -2400,7 +2388,7 @@ export default function WorkspaceClient({
                     Back
                   </Button>
                   <Button
-                    disabled={!agentReady || estimatedCharge > demoBalance}
+                    disabled={!agentReady || estimatedCharge > currentBalance}
                     onClick={() => setPaymentOpen(true)}
                   >
                     <Play className="h-3.5 w-3.5" />
@@ -2408,8 +2396,8 @@ export default function WorkspaceClient({
                   </Button>
                 </div>
                 {agentReady === null && (
-                  <p className="text-right text-[10px] text-muted-foreground">
-                    Checking Agent configuration…
+                  <p className="text-right text-[12px] text-muted-foreground">
+                    Checking the agent configuration…
                   </p>
                 )}
               </div>
@@ -2426,7 +2414,7 @@ export default function WorkspaceClient({
                         </span>
                         <div>
                           <p className="label">Pipeline</p>
-                          <p className="mt-1 text-[10px] text-muted-foreground">
+                          <p className="mt-1 text-[11px] text-muted-foreground">
                             Execution order
                           </p>
                         </div>
@@ -2445,7 +2433,7 @@ export default function WorkspaceClient({
                               />
                             )}
                             <span
-                              className={`relative z-10 grid h-7 w-7 shrink-0 place-items-center rounded-full border text-[10px] ${
+                              className={`relative z-10 grid h-7 w-7 shrink-0 place-items-center rounded-full border text-[11px] ${
                                 step.done
                                   ? "border-primary bg-primary text-white"
                                   : step.active
@@ -2473,7 +2461,7 @@ export default function WorkspaceClient({
                               >
                                 {step.label}
                               </p>
-                              <p className="mt-0.5 truncate text-[9.5px] text-muted-foreground">
+                              <p className="mt-0.5 truncate text-[10.5px] text-muted-foreground">
                                 {step.detail}
                               </p>
                             </div>
@@ -2482,7 +2470,7 @@ export default function WorkspaceClient({
                       </ol>
                       <div className="mt-auto pt-4">
                         <div className="rounded-xl border border-ink/8 bg-paper/70 px-3 py-2.5">
-                          <div className="flex items-center justify-between gap-2 text-[9.5px]">
+                          <div className="flex items-center justify-between gap-2 text-[10.5px]">
                             <span className="text-muted-foreground">
                               Session
                             </span>
@@ -2490,7 +2478,7 @@ export default function WorkspaceClient({
                               {activeSessionId}
                             </span>
                           </div>
-                          <div className="mt-1.5 flex items-center justify-between gap-2 text-[9.5px]">
+                          <div className="mt-1.5 flex items-center justify-between gap-2 text-[10.5px]">
                             <span className="text-muted-foreground">
                               Runtime
                             </span>
@@ -2511,8 +2499,8 @@ export default function WorkspaceClient({
                             <Terminal className="h-4 w-4" />
                           </span>
                           <div>
-                            <p className="label">Agent Trace</p>
-                            <p className="mt-1 font-mono text-[9px] text-muted-foreground">
+                            <p className="label">Activity log</p>
+                            <p className="mt-1 font-mono text-[10px] text-muted-foreground">
                               {activeSessionId} ·{" "}
                               {runtime === "private"
                                 ? "private sandbox"
@@ -2527,7 +2515,7 @@ export default function WorkspaceClient({
                       </div>
                       <div
                         ref={traceRef}
-                        className="max-h-[430px] min-h-[360px] space-y-2 overflow-y-auto bg-[#0d1117] p-4 font-mono text-[11px] leading-relaxed text-slate-300"
+                        className="max-h-[430px] min-h-[360px] space-y-2 overflow-y-auto bg-[#0d1117] p-4 font-mono text-[12px] leading-relaxed text-slate-300"
                       >
                         <p className="text-slate-500">
                           $ connect --workspace {activeSessionId}
@@ -2554,7 +2542,7 @@ export default function WorkspaceClient({
                         ))}
                         {!activities.length && !messages.length && (
                           <p className="text-slate-500">
-                            Waiting for Agent to start…
+                            Waiting for the agent to start…
                           </p>
                         )}
                         <p className="flex items-center gap-1.5 pt-1">
@@ -2569,14 +2557,16 @@ export default function WorkspaceClient({
                     <div className="flex flex-wrap items-center justify-between gap-3">
                       <div className="flex items-center gap-2">
                         <Box className="h-4 w-4 text-primary" />
-                        <p className="text-xs font-semibold">Event run</p>
-                        <span className="font-mono text-[9.5px] text-muted-foreground">
+                        <p className="text-[13px] font-semibold">
+                          Run progress
+                        </p>
+                        <span className="font-mono text-[10.5px] text-muted-foreground">
                           {processEventCount} event
                           {processEventCount === 1 ? "" : "s"}
                         </span>
                       </div>
                       <div className="flex items-center gap-3">
-                        <span className="font-display text-lg font-bold">
+                        <span className="font-display text-lg font-semibold">
                           {Math.round(processProgress)}%
                         </span>
                         <Button
@@ -2595,7 +2585,7 @@ export default function WorkspaceClient({
                         style={{ width: `${processProgress}%` }}
                       />
                     </div>
-                    <div className="mt-2 flex items-center justify-between gap-2 text-[10px] text-muted-foreground">
+                    <div className="mt-2 flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
                       <span>
                         Working in an isolated workspace · live agent output
                       </span>
@@ -2624,7 +2614,7 @@ export default function WorkspaceClient({
                   <div className="flex items-start justify-between gap-3">
                     <div>
                       <p className="label">Run complete · review required</p>
-                      <h2 className="mt-2 font-display text-xl font-bold">
+                      <h2 className="mt-2 font-display text-xl font-semibold">
                         Agent result
                       </h2>
                     </div>
@@ -2649,18 +2639,18 @@ export default function WorkspaceClient({
                   </div>
                   <div className="mt-3 grid gap-3 sm:grid-cols-2">
                     <div className="rounded-xl bg-paper/80 p-3.5">
-                      <p className="font-mono text-[9px] uppercase tracking-wide text-muted-foreground">
+                      <p className="font-mono text-[10px] uppercase tracking-wide text-muted-foreground">
                         Agent usage · actual
                       </p>
                       <p className="mt-2 text-xs">
                         {usage
                           ? `${(usage.input_tokens ?? 0).toLocaleString()} input · ${(usage.output_tokens ?? 0).toLocaleString()} output tokens`
-                          : "Usage was not returned by Agent."}
+                          : "Usage was not returned by the agent."}
                       </p>
                     </div>
                     <div className="rounded-xl bg-paper/80 p-3.5">
-                      <p className="font-mono text-[9px] uppercase tracking-wide text-muted-foreground">
-                        Payment
+                      <p className="font-mono text-[10px] uppercase tracking-wide text-muted-foreground">
+                        Estimated charge
                       </p>
                       <p className="mt-2 text-xs">
                         {money(estimatedCharge)} credits
@@ -2679,7 +2669,7 @@ export default function WorkspaceClient({
                             className="flex items-center gap-3 px-3 py-2.5"
                           >
                             <FileText className="h-4 w-4 text-primary" />
-                            <span className="min-w-0 flex-1 truncate text-[11px]">
+                            <span className="min-w-0 flex-1 truncate text-[12px]">
                               {file.name}
                             </span>
                             <Button
@@ -2706,14 +2696,18 @@ export default function WorkspaceClient({
                   sessionId={activeSessionId}
                 />
                 <div className="bai-card p-5">
-                  <label className="block text-xs font-semibold">
+                  <label
+                    htmlFor="revision-note"
+                    className="block text-[13px] font-semibold"
+                  >
                     Revision note{" "}
                     <span className="font-normal text-muted-foreground">
-                      (required for Reject or Update Result)
+                      (required to reject or request an update)
                     </span>
                     <textarea
-                      className="mt-2 min-h-20 w-full rounded-xl border border-ink/12 bg-white p-3 text-xs"
-                      placeholder="Tell Agent what to change…"
+                      id="revision-note"
+                      className="field-input mt-2 min-h-20"
+                      placeholder="Describe what should change…"
                       value={rejectNote}
                       onChange={(event) => setRejectNote(event.target.value)}
                       maxLength={4000}
@@ -2727,7 +2721,7 @@ export default function WorkspaceClient({
                       disabled={!rejectNote.trim()}
                     >
                       <RotateCcw className="h-3.5 w-3.5" />
-                      Reject
+                      Reject result
                     </Button>
                     <Button
                       variant="line"
@@ -2735,11 +2729,11 @@ export default function WorkspaceClient({
                       disabled={!rejectNote.trim()}
                     >
                       <RotateCcw className="h-3.5 w-3.5" />
-                      Update Result
+                      Request an update
                     </Button>
                     <Button onClick={() => void acceptResult()}>
                       <Check className="h-3.5 w-3.5" />
-                      Accept
+                      Accept result
                     </Button>
                   </div>
                 </div>
@@ -2757,14 +2751,14 @@ export default function WorkspaceClient({
                     ? "Result rejected"
                     : "Task accepted"}
                 </p>
-                <h2 className="mt-2 font-display text-2xl font-bold">
+                <h2 className="mt-2 font-display text-2xl font-semibold">
                   Your review is complete.
                 </h2>
                 <p className="mt-2 max-w-xl text-xs leading-relaxed text-muted-foreground">
                   {sessions.find((session) => session.id === activeSessionId)
                     ?.status === "rejected"
-                    ? "This result was rejected. Agent runtime data has been cleaned."
-                    : "This result was accepted. Agent runtime data has been cleaned."}
+                    ? "This result was rejected. The agent's runtime data has been removed."
+                    : "This result was accepted. The agent's runtime data has been removed."}
                 </p>
                 <div className="mt-5 rounded-xl border border-ink/8 bg-white p-4">
                   <p className="label mb-3">Agent result</p>
@@ -2813,29 +2807,27 @@ export default function WorkspaceClient({
                       Retry data cleanup
                     </Button>
                   )}
-                  <p className="text-[10.5px] text-muted-foreground">
+                  <p className="text-[12px] text-muted-foreground">
                     {cleanupDone
-                      ? "Agent runtime data cleaned."
-                      : "Cleanup did not finish. Retry to remove Agent runtime data."}
+                      ? "Agent runtime data removed."
+                      : "Cleanup did not finish. Retry to remove the agent's runtime data."}
                   </p>
                 </div>
               </div>
             )}
           </section>
         </div>
-
-        {/* <div className="mt-7">
-          <SessionHistory sessions={sessions} onDelete={deleteSessionRecord} />
-        </div> */}
       </main>
 
       <Dialog open={paymentOpen} onOpenChange={setPaymentOpen}>
         <DialogContent className="max-w-md rounded-2xl">
           <DialogHeader>
-            <DialogTitle className="font-display text-xl">
-              Confirm payment
+            <DialogTitle className="font-display text-xl font-semibold">
+              Confirm this run
             </DialogTitle>
-            <DialogDescription>Checkout for {agent.name}.</DialogDescription>
+            <DialogDescription>
+              Review the estimate before starting {agent.name}.
+            </DialogDescription>
           </DialogHeader>
           <div className="rounded-xl border border-ink/8 bg-paper/70 p-4">
             <div className="flex justify-between text-xs">
@@ -2843,12 +2835,12 @@ export default function WorkspaceClient({
               <b>{money(estimatedCharge)}</b>
             </div>
             <div className="mt-2 flex justify-between text-xs text-muted-foreground">
-              <span>Balance after payment</span>
-              <span>{money(demoBalance - estimatedCharge)}</span>
+              <span>Total balance after this run</span>
+              <span>{money(currentBalance - estimatedCharge)}</span>
             </div>
-            <div className="mt-3 border-t border-ink/8 pt-3 text-[10px] leading-relaxed text-muted-foreground">
+            <div className="mt-3 border-t border-border pt-3 text-[12px] leading-relaxed text-muted-foreground">
               Environment:{" "}
-              <b className="text-xs">
+              <b className="text-xs font-semibold text-foreground">
                 {runtime === "private" ? "Private workspace" : "Shared server"}.
               </b>
             </div>
@@ -2867,7 +2859,7 @@ export default function WorkspaceClient({
               disabled={!agentReady}
             >
               <Check className="h-3.5 w-3.5" />
-              Pay {money(estimatedCharge)} credits & run
+              Use {money(estimatedCharge)} credits &amp; run
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -2876,9 +2868,8 @@ export default function WorkspaceClient({
       {/* QuickBooks Connection Dialog */}
       <Dialog open={qbDialogOpen} onOpenChange={setQbDialogOpen}>
         <DialogContent className="max-w-md rounded-2xl p-0 overflow-hidden">
-          {/* Green Header */}
-          <div className="bg-gradient-to-br from-[#2CA01C] to-[#1F7A14] px-6 pt-7 pb-5 text-center text-white">
-            <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-white/20 backdrop-blur-sm">
+          <div className="border-b border-border bg-muted/40 px-6 pb-5 pt-6 text-center">
+            <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-xl border border-border bg-card">
               <svg
                 width="28"
                 height="28"
@@ -2886,25 +2877,31 @@ export default function WorkspaceClient({
                 fill="none"
                 xmlns="http://www.w3.org/2000/svg"
               >
-                <circle cx="12" cy="12" r="11" fill="white" fillOpacity="0.2" />
+                <circle
+                  cx="12"
+                  cy="12"
+                  r="11"
+                  fill="hsl(var(--primary))"
+                  fillOpacity="0.12"
+                />
                 <path
                   d="M7.5 7.5C6.12 7.5 5 8.62 5 10v4c0 1.38 1.12 2.5 2.5 2.5H9v-1.5H7.5c-.55 0-1-.45-1-1v-4c0-.55.45-1 1-1H9V14.5c0 1.38 1.12 2.5 2.5 2.5V7.5H7.5z"
-                  fill="white"
+                  fill="hsl(var(--primary))"
                 />
                 <path
                   d="M16.5 16.5c1.38 0 2.5-1.12 2.5-2.5v-4c0-1.38-1.12-2.5-2.5-2.5H15v1.5h1.5c.55 0 1 .45 1 1v4c0 .55-.45 1-1 1H15V9.5c0-1.38-1.12-2.5-2.5-2.5v9.5h4z"
-                  fill="white"
+                  fill="hsl(var(--primary))"
                 />
               </svg>
             </div>
             <DialogHeader>
-              <DialogTitle className="font-display text-xl text-white">
-                {qbConnected ? "Connected!" : "Connect to QuickBooks"}
+              <DialogTitle className="font-display text-xl font-semibold">
+                {qbConnected ? "QuickBooks connected" : "Connect QuickBooks"}
               </DialogTitle>
-              <DialogDescription className="mt-1 text-white/80 text-xs">
+              <DialogDescription className="mt-1 text-xs">
                 {qbConnected
                   ? "Your Intuit account is linked to this workspace."
-                  : "You'll be redirected to Intuit to sign in and grant access."}
+                  : "You will be redirected to Intuit to sign in and grant access."}
               </DialogDescription>
             </DialogHeader>
           </div>
@@ -2920,24 +2917,24 @@ export default function WorkspaceClient({
                     <p className="truncate text-xs font-semibold text-emerald-800">
                       {qbCompanyName || "QuickBooks company"}
                     </p>
-                    <p className="mt-0.5 truncate font-mono text-[9.5px] text-emerald-700/80">
+                    <p className="mt-0.5 truncate font-mono text-[10.5px] text-emerald-700/80">
                       Realm {qbRealmId || "unknown"}
                     </p>
                   </div>
                 </div>
 
                 <div className="rounded-xl border border-ink/8 bg-paper/60 p-3.5">
-                  <p className="text-[11px] font-semibold">
+                  <p className="text-[12px] font-semibold">
                     QuickBooks connection
                   </p>
-                  <p className="mt-1 text-[10.5px] leading-relaxed text-muted-foreground">
+                  <p className="mt-1 text-[12px] leading-relaxed text-muted-foreground">
                     This connection is used by the MCP server only. Add task
-                    files in the Upload Files tab.
+                    files on the Upload files tab.
                   </p>
                   <button
                     type="button"
                     onClick={() => void disconnectQuickBooks()}
-                    className="mt-3 rounded-lg border border-ink/15 bg-white px-2.5 py-1.5 text-[10px] font-semibold text-ink/70 transition hover:bg-paper"
+                    className="mt-3 rounded-lg border border-ink/15 bg-white px-2.5 py-1.5 text-[11px] font-semibold text-ink/70 transition hover:bg-paper"
                   >
                     Disconnect
                   </button>
@@ -2952,16 +2949,16 @@ export default function WorkspaceClient({
               </div>
             ) : qbConnecting ? (
               <div className="flex flex-col items-center gap-3 py-8">
-                <Loader2 className="h-8 w-8 animate-spin text-[#2CA01C]" />
+                <Loader2 className="h-8 w-8 animate-spin text-primary" />
                 <p className="text-sm font-medium">Redirecting to Intuit…</p>
-                <p className="text-center text-[11px] text-muted-foreground">
+                <p className="text-center text-[12px] text-muted-foreground">
                   Sign in on Intuit&apos;s secure page to authorize this app.
                 </p>
               </div>
             ) : (
               <div className="space-y-4">
                 {qbError && (
-                  <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[11px] text-red-600">
+                  <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[12px] text-red-600">
                     {qbError}
                   </div>
                 )}
@@ -2973,10 +2970,10 @@ export default function WorkspaceClient({
                     "Intuit returns you here with secure OAuth tokens.",
                   ].map((step, index) => (
                     <li key={step} className="flex items-start gap-2.5">
-                      <span className="grid h-5 w-5 shrink-0 place-items-center rounded-full bg-[#2CA01C]/10 text-[10px] font-semibold text-[#1F7A14]">
+                      <span className="grid h-5 w-5 shrink-0 place-items-center rounded-full bg-primary/10 text-[11px] font-semibold text-primary">
                         {index + 1}
                       </span>
-                      <span className="text-[11px] leading-relaxed text-muted-foreground">
+                      <span className="text-[12px] leading-relaxed text-muted-foreground">
                         {step}
                       </span>
                     </li>
@@ -2984,7 +2981,7 @@ export default function WorkspaceClient({
                 </ol>
                 <div className="flex items-start gap-2 rounded-lg border border-ink/8 px-3 py-2.5">
                   <LockKeyhole className="mt-0.5 h-3 w-3 shrink-0 text-muted-foreground" />
-                  <span className="text-[10px] leading-relaxed text-muted-foreground">
+                  <span className="text-[11px] leading-relaxed text-muted-foreground">
                     Your QuickBooks email and password are entered only on
                     Intuit&apos;s site. This app never sees or stores them.
                   </span>
@@ -2993,11 +2990,11 @@ export default function WorkspaceClient({
                   type="button"
                   onClick={() => void connectQuickBooks()}
                   disabled={qbConnecting}
-                  className="w-full rounded-xl bg-[#2CA01C] px-4 py-2.5 text-[13px] font-semibold text-white shadow-sm transition-all hover:bg-[#248B17] hover:shadow-md active:scale-[0.98] disabled:opacity-60"
+                  className="btn-ink w-full"
                 >
                   Continue to Intuit
                 </button>
-                <p className="text-center text-[10px] text-muted-foreground">
+                <p className="text-center text-[11px] text-muted-foreground">
                   By connecting you agree to Intuit&apos;s{" "}
                   <a
                     href="https://www.intuit.com/legal/terms/"
@@ -3027,12 +3024,12 @@ export default function WorkspaceClient({
       <Dialog open={permissionOpen} onOpenChange={setPermissionOpen}>
         <DialogContent className="max-h-[88vh] overflow-y-auto rounded-2xl sm:max-w-2xl">
           <DialogHeader>
-            <DialogTitle className="font-display text-xl">
-              What may the agent do in QuickBooks Online?
+            <DialogTitle className="font-display text-xl font-semibold">
+              Choose QuickBooks permissions
             </DialogTitle>
             <DialogDescription>
-              Choose the actions this browser session allows. You can change
-              them again before you continue to the prompt.
+              Select the actions this browser session allows. You can change
+              them before continuing to the prompt.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-2">
@@ -3053,7 +3050,7 @@ export default function WorkspaceClient({
                     <span className="block text-[11.5px] font-semibold">
                       {option.title}
                     </span>
-                    <span className="mt-0.5 block text-[10px] leading-relaxed text-muted-foreground">
+                    <span className="mt-0.5 block text-[11px] leading-relaxed text-muted-foreground">
                       {option.detail}
                     </span>
                   </span>
@@ -3061,10 +3058,10 @@ export default function WorkspaceClient({
               );
             })}
           </div>
-          <div className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-[10px] leading-relaxed text-amber-800">
+          <div className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-[11px] leading-relaxed text-amber-800">
             <ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-            Write actions are proposed for your review first. QuickBooks only
-            changes when you explicitly approve the write-back.
+            Write actions are proposed for your review first. QuickBooks changes
+            only when you explicitly approve them.
           </div>
           <DialogFooter>
             <Button variant="line" onClick={() => setPermissionOpen(false)}>

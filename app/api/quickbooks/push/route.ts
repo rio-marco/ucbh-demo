@@ -95,7 +95,7 @@ export async function POST(request: Request) {
   const permissions = await getAgentPermissions(session.hash);
   if (!permissions.includes("update")) {
     return mcpJson(
-      { error: "Grant the Update permission before pushing changes." },
+      { error: "Grant the Update permission before applying changes." },
       403,
       session,
     );
